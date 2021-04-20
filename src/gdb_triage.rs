@@ -99,7 +99,8 @@ enum GdbTriageScript {
 }
 
 pub struct GdbTriager {
-    triage_script: GdbTriageScript
+    triage_script: GdbTriageScript,
+    gdb: String
 }
 
 impl GdbTriager {
@@ -116,18 +117,17 @@ impl GdbTriager {
             _ => ()
         }
 
-        GdbTriager { triage_script }
+        GdbTriager { triage_script, gdb: "gdb".to_string() }
     }
 
     pub fn has_supported_gdb(&self) -> bool {
-        let gdb_exe = "gdb";
         let python_cmd = "python import gdb, sys; print('V:'+gdb.execute('show version', to_string=True).splitlines()[0]); print('P:'+sys.version.splitlines()[0].strip())";
         let gdb_args = vec!["--nx", "--batch", "-iex", &python_cmd];
 
-        let output = match process::execute_capture_output(gdb_exe, &gdb_args) {
+        let output = match process::execute_capture_output(&self.gdb, &gdb_args) {
             Ok(o) => o,
             Err(e) => {
-                println!("[X] Failed to execute '{}': {}", gdb_exe, e);
+                println!("[X] Failed to execute '{}': {}", &self.gdb, e);
                 return false
             }
         };
@@ -182,7 +182,7 @@ impl GdbTriager {
                             "--args");
 
         // TODO: allow user to select GDB
-        let output = match process::execute_capture_output("gdb", &[&gdb_args[..], &prog_args[..]].concat()) {
+        let output = match process::execute_capture_output(&self.gdb, &[&gdb_args[..], &prog_args[..]].concat()) {
             Ok(o) => o,
             Err(e) => return Err(format!("Failed to execute command: {}", e)),
         };

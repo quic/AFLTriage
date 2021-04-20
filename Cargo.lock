@@ -6,6 +6,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "indicatif",
+ "is_executable",
  "lazy_static",
  "libc",
  "md5",
@@ -15,6 +16,7 @@ dependencies = [
  "serde_json",
  "shlex",
  "tempfile",
+ "which",
 ]
 
 [[package]]
@@ -182,6 +184,15 @@ dependencies = [
  "number_prefix",
  "rayon",
  "regex",
+]
+
+[[package]]
+name = "is_executable"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa9acdc6d67b75e626ad644734e8bc6df893d9cd2a834129065d3dd6158ea9c8"
+dependencies = [
+ "winapi",
 ]
 
 [[package]]
@@ -485,6 +496,16 @@ name = "wasi"
 version = "0.10.2+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd6fbd9a79829dd1ad0cc20627bf1ed606756a7f77edff7b66b7064f9cb327c6"
+
+[[package]]
+name = "which"
+version = "4.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b55551e42cbdf2ce2bedd2203d0cc08dba002c27510f86dab6d0ce304cba3dfe"
+dependencies = [
+ "either",
+ "libc",
+]
 
 [[package]]
 name = "winapi"

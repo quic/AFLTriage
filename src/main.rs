@@ -3,10 +3,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 use clap::{arg_enum, Arg, ArgMatches, App, AppSettings, SubCommand, crate_version};
 use std::path::{Path, PathBuf};
+use is_executable::IsExecutable;
 use std::process::{Command, Output};
 use std::io::{self, Write, BufRead};
 use std::collections::HashSet;
 use std::cmp;
+use which::which;
 use md5;
 use libc;
 use indicatif::{ProgressBar, ProgressStyle, ProgressIterator, ParallelProgressIterator};
@@ -80,9 +82,10 @@ fn setup_command_line() -> ArgMatches<'static> {
                                .default_value("text")
                                .case_insensitive(true)
                                .help("The triage report output format."))
-                          .arg(Arg::with_name("binary")
-                               .value_name("BINARY")
+                          .arg(Arg::with_name("triage_cmd")
+                               .value_name("triage_cmd")
                                .takes_value(true)
+                               .required(true)
                                .multiple(true)
                                .index(1)
                                .help("The binary executable and args to execute. Use '@@' as a placeholder for the path to the input file."));
@@ -210,6 +213,29 @@ fn sanity_check(gdb: &GdbTriager, binary_args: &Vec<&str>) -> bool {
         _ => ()
     }
 
+    let rawexe = binary_args.get(0).unwrap();
+    let exe = PathBuf::from(rawexe);
+    let justfilename = exe.file_name().unwrap_or_else(|| std::ffi::OsStr::new("")).to_str().unwrap();
+
+    // A PATH resolvable name
+    if justfilename == rawexe.to_string() {
+        match which::which(rawexe) {
+            Err(e) => {
+                println!("[X] Binary {} not found in PATH. Try using the absolute path",
+                         rawexe);
+                return false
+            }
+            _ => ()
+        }
+
+        println!("PATH based name");
+    } else {
+        if !exe.is_executable() {
+            println!("[X] Binary {} does not exist or is not executable", rawexe);
+            return false;
+        }
+    }
+
     if !gdb.has_supported_gdb() {
         return false
     }
@@ -234,7 +260,9 @@ fn main() {
 
     println!("AFLTriage v{}\n", VERSION);
 
-    let binary_args: Vec<&str> = args.values_of("binary").unwrap().collect();
+    let binary_args: Vec<&str> = args.values_of("triage_cmd").unwrap().collect();
+
+    // TODO: fix binary_args validation
     let gdb: GdbTriager = gdb_triage::GdbTriager::new();
 
     if !sanity_check(&gdb, &binary_args) {
