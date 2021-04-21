@@ -1,12 +1,10 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
-use clap::{arg_enum, Arg, ArgMatches, App, AppSettings, SubCommand, crate_version};
-use std::path::{Path, PathBuf};
+use clap::{arg_enum, Arg, ArgMatches, App, AppSettings, crate_version};
+use std::path::PathBuf;
 use is_executable::IsExecutable;
-use std::process::{Command, Output};
-use std::io::{self, Write, BufRead};
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use std::cmp;
 use which::which;
 use md5;
@@ -33,11 +31,13 @@ const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
 arg_enum! {
     #[derive(PartialEq, Debug)]
+    #[allow(non_camel_case_types)]
     pub enum OutputFormat {
         text,
         markdown,
         json
     }
+
 }
 
 fn isatty() -> bool {
@@ -101,10 +101,16 @@ struct CrashReport {
 
 struct TriageState<'a> {
     testcase: &'a str,
-    report: CrashReport
+    report: TestcaseResult
 }
 
-fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str) -> CrashReport {
+enum TestcaseResult {
+    NoCrash(),
+    Crash(CrashReport),
+    Error(String)
+}
+
+fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str) -> TestcaseResult {
     let mut prog_args: Vec<String> = Vec::new();
 
     for arg in binary_args.iter() {
@@ -118,14 +124,12 @@ fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str) 
     let res = match gdb.triage_testcase(prog_args) {
         Ok(res) => res,
         Err(e) => {
-            let headline = format!("Failed to triage: {}", e);
-            return CrashReport{headline, backtrace:"".to_string(), stackhash:"".to_string()};
+            return TestcaseResult::Error(format!("Failed to triage: {}", e));
         },
     };
 
     if res.current_tid == -1 {
-        let headline = format!("No crash");
-        return CrashReport{headline, backtrace:"".to_string(), stackhash:"".to_string()};
+        return TestcaseResult::NoCrash();
     } else {
         for thread in res.threads {
             if thread.tid == res.current_tid {
@@ -138,7 +142,7 @@ fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str) 
                 //let last_frame_idx = cmp::min(10, frame_names.len());
                 //let frames = &frame_names[7..last_frame_idx];
                 //let frames = &frame_names[7..last_frame_idx];
-                let frames = &thread.backtrace[7..];
+                let frames = &thread.backtrace[0..];
                 let headline = format!("CRASH: tid {} in {}",
                          res.current_tid, frames.get(0).unwrap().symbol.function_name.as_str());
 
@@ -151,12 +155,16 @@ fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str) 
                         i, fr.address, fr.module, fr.symbol.function_name);
                 }
 
-                return CrashReport{headline, backtrace,
-                stackhash: String::from(format!("{:x}", major_hash.compute()))};
+                return TestcaseResult::Crash(
+                    CrashReport {
+                        headline, backtrace,
+                        stackhash: String::from(format!("{:x}", major_hash.compute()))
+                    }
+                );
             }
         }
 
-        return CrashReport{headline:"Thread not found".to_string(), backtrace:"".to_string(), stackhash:"".to_string()};
+        return TestcaseResult::Error("Crashing thread not found in backtrace".into());
     }
 }
 
@@ -183,7 +191,7 @@ struct Testcase {
 fn determine_input_type(input: &PathBuf) -> UserInputPathType {
     let metadata = match input.symlink_metadata() {
         Ok(meta) => meta,
-        Err(e) => return UserInputPathType::Missing
+        Err(_) => return UserInputPathType::Missing
     };
 
     if metadata.file_type().is_file() {
@@ -220,7 +228,7 @@ fn sanity_check(gdb: &GdbTriager, binary_args: &Vec<&str>) -> bool {
     // A PATH resolvable name
     if justfilename == rawexe.to_string() {
         match which::which(rawexe) {
-            Err(e) => {
+            Err(_) => {
                 println!("[X] Binary {} not found in PATH. Try using the absolute path",
                          rawexe);
                 return false
@@ -243,51 +251,11 @@ fn sanity_check(gdb: &GdbTriager, binary_args: &Vec<&str>) -> bool {
     true
 }
 
-fn main() {
-    /* AFLTriage Flow
-     *
-     * 1. Environment sanity check: gdb python, binary exists
-     * 2. Input processing: for each input path determine single file, dir with files, afl dir single, afl
-     *    dir primary/secondaries
-     *      - Reject AFL dirs for multiple different fuzzers and provide guidance for this
-     * 3. Input collection: resolve all paths to input files in a stable order
-     *      - Convert paths to unique identifiers for report writing
-     * 4. Triaging: collect crash info, process crash info, classify/dedup
-     *      - Write report in text/json
-     */
-
-    let args = setup_command_line();
-
-    println!("AFLTriage v{}\n", VERSION);
-
-    let binary_args: Vec<&str> = args.values_of("triage_cmd").unwrap().collect();
-
-    // TODO: fix binary_args validation
-    let gdb: GdbTriager = gdb_triage::GdbTriager::new();
-
-    if !sanity_check(&gdb, &binary_args) {
-        return
-    }
-
-    println!("[+] Image triage cmdline: \"{}\"", binary_args.join(" "));
-
-    let input_paths: Vec<&str> = args.values_of("input").unwrap().collect();
-
-    let mut processed_inputs = Vec::new();
-
-    for input in input_paths {
-        let path = PathBuf::from(input);
-        let ty = determine_input_type(&path);
-
-        processed_inputs.push(UserInputPath {
-            ty, path, fuzzer_stats: None
-        });
-    }
-
+fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Testcase> {
     let mut all_testcases = Vec::new();
     let mut ids = util::UniqueIdFactory::new();
 
-    for mut input in processed_inputs {
+    for input in processed_inputs {
         let pathStr = input.path.to_str().unwrap();
 
         match input.ty {
@@ -295,7 +263,7 @@ fn main() {
                 println!("[+] Triaging single {}", pathStr);
                 all_testcases.push(Testcase {
                     unique_id: ids.from_path(&input.path.as_path()),
-                    path: input.path
+                    path: input.path.clone()
                 });
             },
             UserInputPathType::PlainDir => {
@@ -376,7 +344,53 @@ fn main() {
         }
     }
 
-    if all_testcases.len() == 0 {
+    all_testcases
+}
+
+fn main() {
+    /* AFLTriage Flow
+     *
+     * 1. Environment sanity check: gdb python, binary exists
+     * 2. Input processing: for each input path determine single file, dir with files, afl dir single, afl
+     *    dir primary/secondaries
+     *      - Reject AFL dirs for multiple different fuzzers and provide guidance for this
+     * 3. Input collection: resolve all paths to input files in a stable order
+     *      - Convert paths to unique identifiers for report writing
+     * 4. Triaging: collect crash info, process crash info, classify/dedup
+     *      - Write report in text/json
+     */
+
+    let args = setup_command_line();
+
+    println!("AFLTriage v{} by Grant Hernandez\n", VERSION);
+
+    let binary_args: Vec<&str> = args.values_of("triage_cmd").unwrap().collect();
+
+    // TODO: fix binary_args validation
+    let gdb: GdbTriager = gdb_triage::GdbTriager::new();
+
+    if !sanity_check(&gdb, &binary_args) {
+        return
+    }
+
+    println!("[+] Image triage cmdline: \"{}\"", binary_args.join(" "));
+
+    let input_paths: Vec<&str> = args.values_of("input").unwrap().collect();
+
+    let mut processed_inputs = Vec::new();
+
+    for input in input_paths {
+        let path = PathBuf::from(input);
+        let ty = determine_input_type(&path);
+
+        processed_inputs.push(UserInputPath {
+            ty, path, fuzzer_stats: None
+        });
+    }
+
+    let all_testcases = collect_input_testcases(&mut processed_inputs);
+
+    if all_testcases.is_empty() {
         println!("No testcases found!");
         return
     }
@@ -393,14 +407,11 @@ fn main() {
     rayon::ThreadPoolBuilder::new().num_threads(job_count).build_global().unwrap();
 
     let pb = ProgressBar::new((&all_testcases).len() as u64);
-    let spinner_style = ProgressStyle::default_spinner()
-        .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ")
-        .template("{prefix:.bold.dim} {spinner} {wide_msg}");
 
     let display_progress = isatty();
     if display_progress {
         pb.set_style(ProgressStyle::default_bar()
-                     .template("{spinner:.green} [{pos}/{len} {elapsed_precise}] [{bar:.cyan/blue}] {msg}")
+                     .template("[+] Triaging {spinner:.green} [{pos}/{len} {elapsed_precise}] [{bar:.cyan/blue}] {msg}")
                      .progress_chars("#>-"));
         pb.enable_steady_tick(200);
 
@@ -409,34 +420,82 @@ fn main() {
         println!("{}", format!("Processing initial {} test cases", job_count).as_str());
     }
 
+    let write_message: Box<dyn Fn(String) + Sync> = match display_progress {
+        true => Box::new(|msg| {
+            pb.set_message(&msg)
+        }),
+        false => Box::new(|msg| { println!("{}", msg) })
+    };
+
     let results : Vec<TriageState> = all_testcases.par_iter().map(|testcase| {
         let path = testcase.path.to_str().unwrap();
-        let report = process_test_case(&gdb, &binary_args, path);
+        let result = process_test_case(&gdb, &binary_args, path);
+
+        match &result {
+            TestcaseResult::NoCrash() => write_message("No crash".into()),
+            TestcaseResult::Crash(report) => write_message(format!("CRASH: {}", report.headline)),
+            TestcaseResult::Error(msg) => write_message(format!("ERROR: {}", msg))
+        }
 
         if display_progress {
-            pb.set_message(&report.headline);
             pb.inc(1);
-        } else {
-            println!("{}", report.headline);
         }
 
-        return TriageState { testcase:path, report }
+        return TriageState { testcase:path, report:result }
     }).collect::<Vec<TriageState>>();
 
-    let mut seen = HashSet::new();
+    pb.finish();
 
-    // TODO: print triage stats (crash, no crash, error)
-    for state in results {
-        let hash = &state.report.stackhash;
+    let mut crashes = 0;
+    let mut no_crash = 0;
+    let mut errored = 0;
+    let total = results.len();
 
-        if hash == "" {
-            continue
-        }
+    let mut crash_signature = HashSet::new();
+    let mut unique_errors = HashMap::new();
 
-        if !seen.contains(hash) {
-            println!("--- --- --- --- --- ---\nTestcase: {}\nStack hash: {}\n\n\n{}\n\nbacktrace:\n{}\n",
-                     state.testcase, state.report.stackhash, state.report.headline, state.report.backtrace);
-            seen.insert(hash.to_string());
+    for state in &results {
+        match &state.report  {
+            TestcaseResult::NoCrash() => no_crash += 1,
+            TestcaseResult::Crash(report) => {
+                //let formatted = format_report(&state);
+                crashes += 1;
+
+                if !crash_signature.contains(&report.stackhash) {
+                    println!("--- --- --- --- --- ---\nTestcase: {}\nStack hash: {}\n\n\n{}\n\nbacktrace:\n{}\n",
+                             state.testcase, report.stackhash, report.headline, report.backtrace);
+                    crash_signature.insert(report.stackhash.to_string());
+                }
+            },
+            TestcaseResult::Error(msg) => {
+                if let Some(x) = unique_errors.get_mut(&msg) {
+                    *x += 1
+                } else {
+                    unique_errors.insert(msg, 1);
+                }
+
+                // TODO: accumulate all unique error cases
+                errored += 1;
+            }
         }
     }
+
+    println!("[+] Triage stats [Crashes: {} (unique {}), No crash: {}, Errored: {}]",
+        crashes, crash_signature.len(), no_crash, errored);
+
+    if errored == total {
+        println!("[X] Something seems to be wrong during triage as all testcases errored. Enable --debug for more information");
+    } else if errored > 0 {
+        println!("[!] There was {} error(s) during triage", errored);
+
+        for (err, times) in unique_errors {
+            println!("[X] Triage error: {} (seen {} times)", err, times);
+        }
+    }
+
+    if no_crash == total {
+        println!("[!] None of the testcases crashed! Make sure that you are using the correct target command line and the right set of testcases");
+    }
+
+    // TODO: special cases - no crashes, all errored
 }

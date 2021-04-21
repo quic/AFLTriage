@@ -117,6 +117,7 @@ impl GdbTriager {
             _ => ()
         }
 
+        // TODO: allow user to select GDB
         GdbTriager { triage_script, gdb: "gdb".to_string() }
     }
 
@@ -181,10 +182,9 @@ impl GdbTriager {
                             "-ex", format!("echo {}\n", &MARKER_BACKTRACE.end),
                             "--args");
 
-        // TODO: allow user to select GDB
         let output = match process::execute_capture_output(&self.gdb, &[&gdb_args[..], &prog_args[..]].concat()) {
             Ok(o) => o,
-            Err(e) => return Err(format!("Failed to execute command: {}", e)),
+            Err(e) => return Err(format!("Failed to execute GDB command: {}", e)),
         };
 
         let decoded_stdout = String::from_utf8_lossy(&output.stdout);
