@@ -9,6 +9,7 @@ use std::cmp;
 use which::which;
 use std::env;
 use regex::Regex;
+use std::sync::{Arc, Mutex};
 use md5;
 use libc;
 use indicatif::{ProgressBar, ProgressStyle, ProgressIterator, ParallelProgressIterator};
@@ -106,19 +107,27 @@ struct CrashReport {
     stackhash: String
 }
 
-struct TriageState<'a> {
+struct TestcaseResult<'a> {
     testcase: &'a str,
-    result: TestcaseResult,
+    result: TriageResult,
     report: Option<CrashReport>
 }
 
-enum TestcaseResult {
+struct TriageState {
+    crashed: usize,
+    no_crash: usize,
+    errored: usize,
+    crash_signature: HashSet<String>,
+    unique_errors: HashMap<String, usize>,
+}
+
+enum TriageResult {
     NoCrash(GdbChildResult),
     Crash(GdbTriageResult),
     Error(String)
 }
 
-fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str, debug: bool) -> TestcaseResult {
+fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str, debug: bool) -> TriageResult {
     let mut prog_args: Vec<String> = Vec::new();
 
     for arg in binary_args.iter() {
@@ -132,14 +141,14 @@ fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str, 
     let triage_result = match gdb.triage_testcase(prog_args, debug) {
         Ok(triage_result) => triage_result,
         Err(e) => {
-            return TestcaseResult::Error(format!("Failed to triage: {}", e));
+            return TriageResult::Error(format!("Failed to triage: {}", e));
         },
     };
 
     let crashing_tid = triage_result.thread_info.current_tid;
 
     if crashing_tid == -1 {
-        return TestcaseResult::NoCrash(triage_result.child);
+        return TriageResult::NoCrash(triage_result.child);
     } else {
         let mut found = false;
         for thread in &triage_result.thread_info.threads {
@@ -150,9 +159,9 @@ fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str, 
         }
 
         if !found {
-            return TestcaseResult::Error("Crashing thread not found in backtrace".into());
+            return TriageResult::Error("Crashing thread not found in backtrace".into());
         } else {
-            return TestcaseResult::Crash(triage_result);
+            return TriageResult::Crash(triage_result);
         }
     }
 }
@@ -391,68 +400,6 @@ fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Tes
     all_testcases
 }
 
-fn print_triage_stats(results: &Vec<TriageState>) {
-    let mut crashes = 0;
-    let mut no_crash = 0;
-    let mut errored = 0;
-    let total = results.len();
-
-    let mut crash_signature = HashSet::new();
-    let mut unique_errors = HashMap::new();
-
-    for state in results {
-        match &state.result  {
-            TestcaseResult::NoCrash(child) => no_crash += 1,
-            TestcaseResult::Crash(_) => {
-                let report = state.report.as_ref().unwrap();
-                crashes += 1;
-
-                if !crash_signature.contains(&report.stackhash) {
-                    println!("--- --- --- --- --- ---\nTestcase: {}\nStack hash: {}\n\n\n{}\n\nbacktrace:\n{}\n",
-                             state.testcase, report.stackhash, report.headline, report.backtrace);
-                    crash_signature.insert(report.stackhash.to_string());
-
-                    /*if child_output {
-                        println!("Child STDOUT:\n{}\n\nChild STDERR:\n{}\n",
-                            triage.child.stdout, triage.child.stderr);
-                    }*/
-                }
-            },
-            TestcaseResult::Error(msg) => {
-                println!("{}", msg);
-                if let Some(x) = unique_errors.get_mut(&msg) {
-                    *x += 1
-                } else {
-                    unique_errors.insert(msg, 1);
-                }
-
-                // TODO: accumulate all unique error cases
-                errored += 1;
-            }
-        }
-    }
-
-    println!("[+] Triage stats [Crashes: {} (unique {}), No crash: {}, Errored: {}]",
-        crashes, crash_signature.len(), no_crash, errored);
-
-    if errored == total {
-        // TODO: handle timeout/memory limit different vs. internal errors
-        println!("[X] Something seems to be wrong during triage as all testcases errored.");
-    } 
-
-    if errored > 0 {
-        println!("[!] There were {} error(s) ({} unique) during triage", errored, unique_errors.len());
-
-        for (err, times) in unique_errors {
-            println!("[X] Triage error: {} (seen {} times)", err, times);
-        }
-    }
-
-    if no_crash == total {
-        println!("[!] None of the testcases crashed! Make sure that you are using the correct target command line and the right set of testcases");
-    }
-}
-
 fn main() {
     /* AFLTriage Flow
      *
@@ -480,6 +427,13 @@ fn main() {
     }
 
     println!("[+] Image triage cmdline: \"{}\"", binary_args.join(" "));
+
+    let output = args.value_of("output").unwrap();
+    let mut output_terminal = false;
+
+    if output == "-" {
+        output_terminal = true
+    }
 
     let input_paths: Vec<&str> = args.values_of("input").unwrap().collect();
 
@@ -517,7 +471,7 @@ fn main() {
 
     let pb = ProgressBar::new((&all_testcases).len() as u64);
 
-    let display_progress = isatty() && !child_output && !debug;
+    let display_progress = isatty() && !output_terminal && !debug;
 
     if display_progress {
         pb.set_style(ProgressStyle::default_bar()
@@ -537,23 +491,61 @@ fn main() {
         false => Box::new(|msg| { println!("{}", msg) })
     };
 
-    let results : Vec<TriageState> = all_testcases.par_iter().map(|testcase| {
+    let state = Arc::new(Mutex::new(TriageState {
+        crashed: 0,
+        no_crash: 0,
+        errored: 0,
+        crash_signature: HashSet::new(),
+        unique_errors: HashMap::new(),
+    }));
+
+    let results : Vec<TestcaseResult> = all_testcases.par_iter().map(|testcase| {
         let path = testcase.path.to_str().unwrap();
         let result = process_test_case(&gdb, &binary_args, path, debug);
 
         let report = match &result {
-            TestcaseResult::NoCrash(child) => {
+            TriageResult::Crash(triage) => Some(format_text_report(&triage)),
+            _ => None,
+        };
+
+        // do very little with this lock held. do not reorder
+        let mut state = state.lock().unwrap();
+
+        match &result {
+            TriageResult::NoCrash(child) => {
+                state.no_crash += 1;
+
                 write_message("No crash".into());
-                None
             }
-            TestcaseResult::Crash(triage) => {
-                let report = format_text_report(&triage);
+            TriageResult::Crash(triage) => {
+                let report = report.as_ref().unwrap();
+
+                state.crashed += 1;
+
                 write_message(format!("CRASH: {}", report.headline));
-                Some(report)
+
+                if !display_progress && !state.crash_signature.contains(&report.stackhash) {
+                    println!("--- --- --- --- --- ---\nTestcase: {}\nStack hash: {}\n\n\n{}\n\nbacktrace:\n{}\n",
+                             path, report.stackhash, report.headline, report.backtrace);
+
+                    state.crash_signature.insert(report.stackhash.to_string());
+
+                    if child_output {
+                        println!("Child STDOUT:\n{}\n\nChild STDERR:\n{}\n",
+                            triage.child.stdout, triage.child.stderr);
+                    }
+                }
             }
-            TestcaseResult::Error(msg) => {
+            TriageResult::Error(msg) => {
+                state.errored += 1;
+
+                if let Some(x) = state.unique_errors.get_mut(msg) {
+                    *x += 1
+                } else {
+                    state.unique_errors.insert(msg.to_string(), 1);
+                }
+
                 write_message(format!("ERROR: {}", msg));
-                None
             }
         };
 
@@ -561,10 +553,32 @@ fn main() {
             pb.inc(1);
         }
 
-        return TriageState { testcase:path, result, report }
-    }).collect::<Vec<TriageState>>();
+        return TestcaseResult { testcase:path, result, report }
+    }).collect::<Vec<TestcaseResult>>();
 
     pb.finish_and_clear();
 
-    print_triage_stats(&results);
+    let state = state.lock().unwrap();
+    let total = results.len();
+
+    println!("[+] Triage stats [Crashes: {} (unique {}), No crash: {}, Errored: {}]",
+        state.crashed, state.crash_signature.len(), state.no_crash, state.errored);
+
+    if state.errored == total {
+        // TODO: handle timeout/memory limit different vs. internal errors
+        println!("[X] Something seems to be wrong during triage as all testcases errored.");
+    } 
+
+    if state.errored > 0 {
+        println!("[!] There were {} error(s) ({} unique) during triage",
+            state.errored, state.unique_errors.len());
+
+        for (err, times) in &state.unique_errors {
+            println!("[X] Triage error: {} (seen {} times)", err, times);
+        }
+    }
+
+    if state.no_crash == total {
+        println!("[!] None of the testcases crashed! Make sure that you are using the correct target command line and the right set of testcases");
+    }
 }
