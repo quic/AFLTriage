@@ -429,10 +429,29 @@ fn main() {
     println!("[+] Image triage cmdline: \"{}\"", binary_args.join(" "));
 
     let output = args.value_of("output").unwrap();
-    let mut output_terminal = false;
 
-    if output == "-" {
-        output_terminal = true
+    let output_dir = match output {
+        "-" => None,
+        _ => {
+            let d = std::path::PathBuf::from(output);
+            match std::fs::create_dir(&d) {
+                Err(e) => match e.kind() {
+                    std::io::ErrorKind::AlreadyExists => (),
+                    _ => {
+                        println!("[X] Error creating output directory: {}", e);
+                        return;
+                    }
+                },
+                _ => ()
+            }
+
+            Some(d)
+        }
+    };
+
+    match &output_dir { 
+        Some(d) =>println!("[+] Reports will be output to directory \"{}\"", output),
+        None => println!("[+] Reports output to terminal"),
     }
 
     let input_paths: Vec<&str> = args.values_of("input").unwrap().collect();
@@ -471,7 +490,7 @@ fn main() {
 
     let pb = ProgressBar::new((&all_testcases).len() as u64);
 
-    let display_progress = isatty() && !output_terminal && !debug;
+    let display_progress = isatty() && !output_dir.is_none() && !debug;
 
     if display_progress {
         pb.set_style(ProgressStyle::default_bar()
@@ -522,17 +541,34 @@ fn main() {
 
                 state.crashed += 1;
 
-                write_message(format!("CRASH: {}", report.headline));
+                write_message(format!("CRASH: {} {}", report.headline, testcase.unique_id));
 
-                if !display_progress && !state.crash_signature.contains(&report.stackhash) {
-                    println!("--- --- --- --- --- ---\nTestcase: {}\nStack hash: {}\n\n\n{}\n\nbacktrace:\n{}\n",
-                             path, report.stackhash, report.headline, report.backtrace);
-
+                if !state.crash_signature.contains(&report.stackhash) {
                     state.crash_signature.insert(report.stackhash.to_string());
 
+                    let mut text_report = format!(
+                        "--- --- --- --- --- ---\nTestcase: {}\nStack hash: {}\n\n\n{}\n\nbacktrace:\n{}\n",
+                             path, report.stackhash, report.headline, report.backtrace);
+
                     if child_output {
-                        println!("Child STDOUT:\n{}\n\nChild STDERR:\n{}\n",
+                        text_report += &format!("\nChild STDOUT:\n{}\n\nChild STDERR:\n{}\n",
                             triage.child.stdout, triage.child.stderr);
+                    }
+
+                    if output_dir.is_none() {
+                        write_message(text_report);
+                    } else {
+                        let output_dir = output_dir.as_ref().unwrap();
+                        let report_filename = format!("{}_report.txt", testcase.unique_id);
+
+                        match std::fs::write(output_dir.join(report_filename), text_report) {
+                            Err(e) => {
+                                // TODO: notify
+                                let failed_to_write = format!("Failed to write report: {}", e);
+                                write_message(failed_to_write);
+                            }
+                            _ => (),
+                        }
                     }
                 }
             }
