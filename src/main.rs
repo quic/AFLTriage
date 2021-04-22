@@ -50,30 +50,22 @@ fn setup_command_line() -> ArgMatches<'static> {
     let app = App::new("afltriage")
                           .version(crate_version!())
                           .about("Quickly triage and summarize crashing testcases")
+                          .usage("afltriage -i <input>... -o <output> <command>...")
                           .setting(AppSettings::TrailingVarArg)
                           .setting(AppSettings::DontDelimitTrailingValues)
+                          .setting(AppSettings::DontCollapseArgsInUsage)
                           .arg(Arg::with_name("input")
                                .short("-i")
-                               .long("--input")
                                .takes_value(true)
                                .required(true)
                                .multiple(true)
                                .help("A path to a single testcase, directory of testcases, AFL directory, and/or directory of AFL directories to be triaged."))
-                          .arg(Arg::with_name("recursive")
-                               .short("-R")
-                               .long("--recursive")
-                               .help("Recursively process testcases from input directory."))
                           .arg(Arg::with_name("dryrun")
                                .long("--dry-run")
                                .takes_value(false)
                                .help("Perform sanity checks and describe the inputs to be triaged."))
-                          .arg(Arg::with_name("watch")
-                               .short("-w")
-                               .long("--watch")
-                               .help("Monitor input paths for newly created testcases."))
                           .arg(Arg::with_name("output")
                                .short("-o")
-                               .long("--output")
                                .takes_value(true)
                                .required(true)
                                .help("The output path for triage report files. Use '-' to print to console."))
@@ -88,14 +80,12 @@ fn setup_command_line() -> ArgMatches<'static> {
                                .takes_value(true)
                                .possible_values(&OutputFormat::variants())
                                .default_value("text")
+                               .required(false)
                                .case_insensitive(true)
                                .help("The triage report output format."))
-                          .arg(Arg::with_name("triage_cmd")
-                               .value_name("triage_cmd")
-                               .takes_value(true)
-                               .required(true)
+                          .arg(Arg::with_name("command")
                                .multiple(true)
-                               .index(1)
+                               .required(true)
                                .help("The binary executable and args to execute. Use '@@' as a placeholder for the path to the input file."));
 
     return app.get_matches();
@@ -420,7 +410,7 @@ fn main() {
 
     println!("AFLTriage v{} by Grant Hernandez\n", VERSION);
 
-    let binary_args: Vec<&str> = args.values_of("triage_cmd").unwrap().collect();
+    let binary_args: Vec<&str> = args.values_of("command").unwrap().collect();
 
     // TODO: fix binary_args validation
     let gdb: GdbTriager = GdbTriager::new();
@@ -550,13 +540,15 @@ fn main() {
                     state.crash_signature.insert(report.stackhash.to_string());
 
                     let mut text_report = format!(
-                        "--- --- --- --- --- ---\nTestcase: {}\nStack hash: {}\n\n\n{}\n\nbacktrace:\n{}\n",
+                        "--- REPORT BEGIN ---\nTestcase: {}\nStack hash: {}\n\n\n{}\n\nbacktrace:\n{}\n",
                              path, report.stackhash, report.headline, report.backtrace);
 
                     if child_output {
                         text_report += &format!("\nChild STDOUT:\n{}\n\nChild STDERR:\n{}\n",
                             triage.child.stdout, triage.child.stderr);
                     }
+
+                    text_report += "--- REPORT END ---";
 
                     if output_dir.is_none() {
                         write_message(text_report);
