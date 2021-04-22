@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
 use tempfile;
-use std::process::{Command, Output};
 use std::io::Write;
 
 use crate::process;

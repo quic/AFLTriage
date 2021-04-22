@@ -29,17 +29,16 @@ use gdb_triage::{GdbTriager, GdbTriageResult, GdbChildResult};
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-// strict/fuzzy stack hash
-
 arg_enum! {
     #[derive(PartialEq, Debug)]
+
+    // these are user facing
     #[allow(non_camel_case_types)]
     pub enum OutputFormat {
         text,
         markdown,
         json
     }
-
 }
 
 fn isatty() -> bool {
@@ -47,7 +46,7 @@ fn isatty() -> bool {
 }
 
 fn setup_command_line() -> ArgMatches<'static> {
-    let mut app = App::new("afltriage")
+    let app = App::new("afltriage")
                           .version(crate_version!())
                           .about("Quickly triage and summarize crashing testcases")
                           .setting(AppSettings::TrailingVarArg)
@@ -109,7 +108,8 @@ struct CrashReport {
 
 struct TriageState<'a> {
     testcase: &'a str,
-    report: TestcaseResult
+    result: TestcaseResult,
+    report: Option<CrashReport>
 }
 
 enum TestcaseResult {
@@ -391,6 +391,68 @@ fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Tes
     all_testcases
 }
 
+fn print_triage_stats(results: &Vec<TriageState>) {
+    let mut crashes = 0;
+    let mut no_crash = 0;
+    let mut errored = 0;
+    let total = results.len();
+
+    let mut crash_signature = HashSet::new();
+    let mut unique_errors = HashMap::new();
+
+    for state in results {
+        match &state.result  {
+            TestcaseResult::NoCrash(child) => no_crash += 1,
+            TestcaseResult::Crash(_) => {
+                let report = state.report.as_ref().unwrap();
+                crashes += 1;
+
+                if !crash_signature.contains(&report.stackhash) {
+                    println!("--- --- --- --- --- ---\nTestcase: {}\nStack hash: {}\n\n\n{}\n\nbacktrace:\n{}\n",
+                             state.testcase, report.stackhash, report.headline, report.backtrace);
+                    crash_signature.insert(report.stackhash.to_string());
+
+                    /*if child_output {
+                        println!("Child STDOUT:\n{}\n\nChild STDERR:\n{}\n",
+                            triage.child.stdout, triage.child.stderr);
+                    }*/
+                }
+            },
+            TestcaseResult::Error(msg) => {
+                println!("{}", msg);
+                if let Some(x) = unique_errors.get_mut(&msg) {
+                    *x += 1
+                } else {
+                    unique_errors.insert(msg, 1);
+                }
+
+                // TODO: accumulate all unique error cases
+                errored += 1;
+            }
+        }
+    }
+
+    println!("[+] Triage stats [Crashes: {} (unique {}), No crash: {}, Errored: {}]",
+        crashes, crash_signature.len(), no_crash, errored);
+
+    if errored == total {
+        // TODO: handle timeout/memory limit different vs. internal errors
+        println!("[X] Something seems to be wrong during triage as all testcases errored.");
+    } 
+
+    if errored > 0 {
+        println!("[!] There were {} error(s) ({} unique) during triage", errored, unique_errors.len());
+
+        for (err, times) in unique_errors {
+            println!("[X] Triage error: {} (seen {} times)", err, times);
+        }
+    }
+
+    if no_crash == total {
+        println!("[!] None of the testcases crashed! Make sure that you are using the correct target command line and the right set of testcases");
+    }
+}
+
 fn main() {
     /* AFLTriage Flow
      *
@@ -479,78 +541,30 @@ fn main() {
         let path = testcase.path.to_str().unwrap();
         let result = process_test_case(&gdb, &binary_args, path, debug);
 
-        match &result {
-            TestcaseResult::NoCrash(child) => write_message("No crash".into()),
-            TestcaseResult::Crash(triage) => write_message(format!("CRASH: {}", "unk")),//report.headline)),
-            TestcaseResult::Error(msg) => write_message(format!("ERROR: {}", msg))
-        }
+        let report = match &result {
+            TestcaseResult::NoCrash(child) => {
+                write_message("No crash".into());
+                None
+            }
+            TestcaseResult::Crash(triage) => {
+                let report = format_text_report(&triage);
+                write_message(format!("CRASH: {}", report.headline));
+                Some(report)
+            }
+            TestcaseResult::Error(msg) => {
+                write_message(format!("ERROR: {}", msg));
+                None
+            }
+        };
 
         if display_progress {
             pb.inc(1);
         }
 
-        return TriageState { testcase:path, report:result }
+        return TriageState { testcase:path, result, report }
     }).collect::<Vec<TriageState>>();
 
     pb.finish_and_clear();
 
-    let mut crashes = 0;
-    let mut no_crash = 0;
-    let mut errored = 0;
-    let total = results.len();
-
-    let mut crash_signature = HashSet::new();
-    let mut unique_errors = HashMap::new();
-
-    for state in &results {
-        match &state.report  {
-            TestcaseResult::NoCrash(child) => no_crash += 1,
-            TestcaseResult::Crash(triage) => {
-                let report = format_text_report(triage);
-                crashes += 1;
-
-                if !crash_signature.contains(&report.stackhash) {
-                    println!("--- --- --- --- --- ---\nTestcase: {}\nStack hash: {}\n\n\n{}\n\nbacktrace:\n{}\n",
-                             state.testcase, report.stackhash, report.headline, report.backtrace);
-                    crash_signature.insert(report.stackhash.to_string());
-
-                    if child_output {
-                        println!("Child STDOUT:\n{}\n\nChild STDERR:\n{}\n",
-                            triage.child.stdout, triage.child.stderr);
-                    }
-                }
-            },
-            TestcaseResult::Error(msg) => {
-                println!("{}", msg);
-                if let Some(x) = unique_errors.get_mut(&msg) {
-                    *x += 1
-                } else {
-                    unique_errors.insert(msg, 1);
-                }
-
-                // TODO: accumulate all unique error cases
-                errored += 1;
-            }
-        }
-    }
-
-    println!("[+] Triage stats [Crashes: {} (unique {}), No crash: {}, Errored: {}]",
-        crashes, crash_signature.len(), no_crash, errored);
-
-    if errored == total {
-        // TODO: handle timeout/memory limit different vs. internal errors
-        println!("[X] Something seems to be wrong during triage as all testcases errored.");
-    } 
-
-    if errored > 0 {
-        println!("[!] There were {} error(s) ({} unique) during triage", errored, unique_errors.len());
-
-        for (err, times) in unique_errors {
-            println!("[X] Triage error: {} (seen {} times)", err, times);
-        }
-    }
-
-    if no_crash == total {
-        println!("[!] None of the testcases crashed! Make sure that you are using the correct target command line and the right set of testcases");
-    }
+    print_triage_stats(&results);
 }
