@@ -298,7 +298,7 @@ fn sanity_check(gdb: &GdbTriager, binary_args: &Vec<&str>) -> bool {
                 _ => ()
             }
         }
-        Err(_) => env::set_var("ASAN_OPTIONS", "abort_on_error=1")
+        Err(_) => env::set_var("ASAN_OPTIONS", "abort_on_error=1:allow_user_segv_handler=0:symbolize=1,detect_leaks=0")
     }
 
     true
@@ -350,6 +350,11 @@ fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Tes
                         let mut valid = 0;
                         for tc in tcs {
                             if tc.is_file() {
+                                // TODO: filter command (.*id:.*)
+                                if tc.file_name().unwrap() == "README.txt" {
+                                    continue;
+                                }
+
                                 valid += 1;
                                 all_testcases.push(Testcase {
                                     unique_id: ids.from_path(&tc),
@@ -358,8 +363,6 @@ fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Tes
                             }
                         }
 
-                        // TODO: ignore README.txt
-                        // TODO: filter command (.*id:.*)
                         if valid > 0 {
                             println!("[+] Triaging AFL directory {} ({} files)",
                                 pathStr, valid);
@@ -563,7 +566,7 @@ fn main() {
 
                         match std::fs::write(output_dir.join(report_filename), text_report) {
                             Err(e) => {
-                                // TODO: notify
+                                // TODO: notify / exit early
                                 let failed_to_write = format!("Failed to write report: {}", e);
                                 write_message(failed_to_write);
                             }
