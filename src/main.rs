@@ -7,6 +7,8 @@ use is_executable::IsExecutable;
 use std::collections::{HashSet, HashMap};
 use std::cmp;
 use which::which;
+use std::env;
+use regex::Regex;
 use md5;
 use libc;
 use indicatif::{ProgressBar, ProgressStyle, ProgressIterator, ParallelProgressIterator};
@@ -23,7 +25,7 @@ pub mod util;
 pub mod process;
 pub mod gdb_triage;
 
-use gdb_triage::GdbTriager;
+use gdb_triage::{GdbTriager, GdbTriageResult, GdbChildResult};
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -75,6 +77,12 @@ fn setup_command_line() -> ArgMatches<'static> {
                                .takes_value(true)
                                .required(true)
                                .help("The output path for triage report files. Use '-' to print to console."))
+                          .arg(Arg::with_name("debug")
+                               .long("--debug")
+                               .help("Enable low-level debugging of triage operations."))
+                          .arg(Arg::with_name("child_output")
+                               .long("--child-output")
+                               .help("Include child output in triage reports."))
                           .arg(Arg::with_name("ofmt")
                                .long("--output-format")
                                .takes_value(true)
@@ -105,12 +113,12 @@ struct TriageState<'a> {
 }
 
 enum TestcaseResult {
-    NoCrash(),
-    Crash(CrashReport),
+    NoCrash(GdbChildResult),
+    Crash(GdbTriageResult),
     Error(String)
 }
 
-fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str) -> TestcaseResult {
+fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str, debug: bool) -> TestcaseResult {
     let mut prog_args: Vec<String> = Vec::new();
 
     for arg in binary_args.iter() {
@@ -121,51 +129,69 @@ fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str) 
         }
     }
 
-    let res = match gdb.triage_testcase(prog_args) {
-        Ok(res) => res,
+    let triage_result = match gdb.triage_testcase(prog_args, debug) {
+        Ok(triage_result) => triage_result,
         Err(e) => {
             return TestcaseResult::Error(format!("Failed to triage: {}", e));
         },
     };
 
-    if res.current_tid == -1 {
-        return TestcaseResult::NoCrash();
+    let crashing_tid = triage_result.thread_info.current_tid;
+
+    if crashing_tid == -1 {
+        return TestcaseResult::NoCrash(triage_result.child);
     } else {
-        for thread in res.threads {
-            if thread.tid == res.current_tid {
-                let frame_names = thread.backtrace.iter()
-                    .map(|e| e.symbol.function_name.as_str())
-                    .collect::<Vec<&str>>();
-                let frame = thread.backtrace.get(0).unwrap();
-                /*let msg = format!("CRASH: tid {} {} [input {}]",
-                         res.current_tid, frame.symbol.function_name, testcase);*/
-                //let last_frame_idx = cmp::min(10, frame_names.len());
-                //let frames = &frame_names[7..last_frame_idx];
-                //let frames = &frame_names[7..last_frame_idx];
-                let frames = &thread.backtrace[0..];
-                let headline = format!("CRASH: tid {} in {}",
-                         res.current_tid, frames.get(0).unwrap().symbol.function_name.as_str());
-
-                let mut major_hash = md5::Context::new();
-                let mut backtrace = String::new();
-
-                for (i, fr) in frames.iter().enumerate() {
-                    major_hash.consume(fr.pretty_address.as_bytes());
-                    backtrace += &format!("#{:<2} pc {:<08x} {} ({})\n",
-                        i, fr.address, fr.module, fr.symbol.function_name);
-                }
-
-                return TestcaseResult::Crash(
-                    CrashReport {
-                        headline, backtrace,
-                        stackhash: String::from(format!("{:x}", major_hash.compute()))
-                    }
-                );
+        let mut found = false;
+        for thread in &triage_result.thread_info.threads {
+            if thread.tid == crashing_tid {
+                found = true;
+                break
             }
         }
 
-        return TestcaseResult::Error("Crashing thread not found in backtrace".into());
+        if !found {
+            return TestcaseResult::Error("Crashing thread not found in backtrace".into());
+        } else {
+            return TestcaseResult::Crash(triage_result);
+        }
     }
+}
+
+fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
+    let mut report = CrashReport {
+        headline: "".to_string(),
+        stackhash: "".to_string(),
+        backtrace: "".to_string(),
+    };
+
+    let crashing_tid = triage_result.thread_info.current_tid;
+
+    for thread in &triage_result.thread_info.threads {
+        if thread.tid == crashing_tid {
+            let frame_names = thread.backtrace.iter()
+                .map(|e| e.symbol.function_name.as_str())
+                .collect::<Vec<&str>>();
+
+            let frames = &thread.backtrace[0..];
+            let headline = format!("tid {} in {}",
+                     crashing_tid, frames.get(0).unwrap().symbol.function_name.as_str());
+
+            let mut major_hash = md5::Context::new();
+            let mut backtrace = String::new();
+
+            for (i, fr) in frames.iter().enumerate() {
+                major_hash.consume(fr.pretty_address.as_bytes());
+                backtrace += &format!("#{:<2} pc {:<08x} {} ({})\n",
+                    i, fr.address, fr.module, fr.symbol.function_name);
+            }
+
+            report.headline = headline;
+            report.stackhash = String::from(format!("{:x}", major_hash.compute()));
+            report.backtrace = backtrace;
+        }
+    }
+
+    report
 }
 
 enum UserInputPathType {
@@ -246,6 +272,24 @@ fn sanity_check(gdb: &GdbTriager, binary_args: &Vec<&str>) -> bool {
 
     if !gdb.has_supported_gdb() {
         return false
+    }
+
+    // TODO: ASAN_SYMBOLIZER_PATH=`which addr2line`
+
+    match env::var("ASAN_OPTIONS") {
+        Ok(val) => {
+            println!("[!] Using ASAN_OPTIONS=\"{}\" that was set by the environment. This can change triage result accuracy", val);
+
+            let re = Regex::new(r"abort_on_error=(1|true)").unwrap();
+            match re.find(&val) {
+                None => {
+                    println!("[X] ASAN_OPTIONS does not have required abort_on_error=1 option");
+                    return false;
+                }
+                _ => ()
+            }
+        }
+        Err(_) => env::set_var("ASAN_OPTIONS", "abort_on_error=1")
     }
 
     true
@@ -367,7 +411,7 @@ fn main() {
     let binary_args: Vec<&str> = args.values_of("triage_cmd").unwrap().collect();
 
     // TODO: fix binary_args validation
-    let gdb: GdbTriager = gdb_triage::GdbTriager::new();
+    let gdb: GdbTriager = GdbTriager::new();
 
     if !sanity_check(&gdb, &binary_args) {
         return
@@ -400,6 +444,9 @@ fn main() {
         return
     }
 
+    let debug = args.is_present("debug");
+    let child_output = args.is_present("child_output");
+
     let requested_job_count = 20;
     let job_count = std::cmp::min(requested_job_count, all_testcases.len());
 
@@ -408,7 +455,8 @@ fn main() {
 
     let pb = ProgressBar::new((&all_testcases).len() as u64);
 
-    let display_progress = isatty();
+    let display_progress = isatty() && !child_output && !debug;
+
     if display_progress {
         pb.set_style(ProgressStyle::default_bar()
                      .template("[+] Triaging {spinner:.green} [{pos}/{len} {elapsed_precise}] [{bar:.cyan/blue}] {msg}")
@@ -429,11 +477,11 @@ fn main() {
 
     let results : Vec<TriageState> = all_testcases.par_iter().map(|testcase| {
         let path = testcase.path.to_str().unwrap();
-        let result = process_test_case(&gdb, &binary_args, path);
+        let result = process_test_case(&gdb, &binary_args, path, debug);
 
         match &result {
-            TestcaseResult::NoCrash() => write_message("No crash".into()),
-            TestcaseResult::Crash(report) => write_message(format!("CRASH: {}", report.headline)),
+            TestcaseResult::NoCrash(child) => write_message("No crash".into()),
+            TestcaseResult::Crash(triage) => write_message(format!("CRASH: {}", "unk")),//report.headline)),
             TestcaseResult::Error(msg) => write_message(format!("ERROR: {}", msg))
         }
 
@@ -444,7 +492,7 @@ fn main() {
         return TriageState { testcase:path, report:result }
     }).collect::<Vec<TriageState>>();
 
-    pb.finish();
+    pb.finish_and_clear();
 
     let mut crashes = 0;
     let mut no_crash = 0;
@@ -456,18 +504,24 @@ fn main() {
 
     for state in &results {
         match &state.report  {
-            TestcaseResult::NoCrash() => no_crash += 1,
-            TestcaseResult::Crash(report) => {
-                //let formatted = format_report(&state);
+            TestcaseResult::NoCrash(child) => no_crash += 1,
+            TestcaseResult::Crash(triage) => {
+                let report = format_text_report(triage);
                 crashes += 1;
 
                 if !crash_signature.contains(&report.stackhash) {
                     println!("--- --- --- --- --- ---\nTestcase: {}\nStack hash: {}\n\n\n{}\n\nbacktrace:\n{}\n",
                              state.testcase, report.stackhash, report.headline, report.backtrace);
                     crash_signature.insert(report.stackhash.to_string());
+
+                    if child_output {
+                        println!("Child STDOUT:\n{}\n\nChild STDERR:\n{}\n",
+                            triage.child.stdout, triage.child.stderr);
+                    }
                 }
             },
             TestcaseResult::Error(msg) => {
+                println!("{}", msg);
                 if let Some(x) = unique_errors.get_mut(&msg) {
                     *x += 1
                 } else {
@@ -484,9 +538,12 @@ fn main() {
         crashes, crash_signature.len(), no_crash, errored);
 
     if errored == total {
-        println!("[X] Something seems to be wrong during triage as all testcases errored. Enable --debug for more information");
-    } else if errored > 0 {
-        println!("[!] There was {} error(s) during triage", errored);
+        // TODO: handle timeout/memory limit different vs. internal errors
+        println!("[X] Something seems to be wrong during triage as all testcases errored.");
+    } 
+
+    if errored > 0 {
+        println!("[!] There were {} error(s) ({} unique) during triage", errored, unique_errors.len());
 
         for (err, times) in unique_errors {
             println!("[X] Triage error: {} (seen {} times)", err, times);
@@ -496,6 +553,4 @@ fn main() {
     if no_crash == total {
         println!("[!] None of the testcases crashed! Make sure that you are using the correct target command line and the right set of testcases");
     }
-
-    // TODO: special cases - no crashes, all errored
 }

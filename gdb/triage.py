@@ -1,7 +1,9 @@
 # Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
-# GDB Triage Script
+# 
+# GDB Triage to JSON Script
+# by Grant Hernandez
 import gdb
 import collections
 import json

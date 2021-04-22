@@ -46,9 +46,22 @@ pub struct GdbThread {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct GdbTriageResult {
+pub struct GdbThreadInfo {
     pub current_tid: i32,
     pub threads: Vec<GdbThread>,
+}
+
+#[derive(Debug)]
+pub struct GdbChildResult {
+    pub stdout: String,
+    pub stderr: String,
+    pub status_code: i32
+}
+
+#[derive(Debug)]
+pub struct GdbTriageResult {
+    pub thread_info: GdbThreadInfo,
+    pub child: GdbChildResult,
 }
 
 macro_rules! vec_of_strings {
@@ -157,7 +170,7 @@ impl GdbTriager {
         true
     }
 
-    pub fn triage_testcase(&self, prog_args: Vec<String>) -> Result<GdbTriageResult, String> {
+    pub fn triage_testcase(&self, prog_args: Vec<String>, show_raw_output: bool) -> Result<GdbTriageResult, String> {
         let triage_script_path = match &self.triage_script  {
             GdbTriageScript::Internal(tf) => tf.path(),
             _ => return Err(format!("Unsupported triage script path")),
@@ -169,14 +182,15 @@ impl GdbTriager {
                             "--batch", "--nx",
                             "-iex", "set index-cache on",
                             "-iex", "set index-cache directory gdb_cache",
-                            "-ex", format!("echo {}\n", &MARKER_CHILD_OUTPUT.start),
+                            // write the marker to both stdout and stderr as they are not interleaved
+                            "-ex", format!("python [x.write('{}\\n') for x in [sys.stdout, sys.stderr]]", &MARKER_CHILD_OUTPUT.start),
                             "-ex", "set logging file /dev/null",
                             "-ex", "set logging redirect on",
                             "-ex", "set logging on",
                             "-ex", "run",
                             "-ex", "set logging redirect off",
                             "-ex", "set logging off",
-                            "-ex", format!("echo {}\n", &MARKER_CHILD_OUTPUT.end),
+                            "-ex", format!("python [x.write('{}\\n') for x in [sys.stdout, sys.stderr]]", &MARKER_CHILD_OUTPUT.end),
                             "-ex", format!("echo {}\n", &MARKER_BACKTRACE.start),
                             "-x", triage_script_path.to_str().unwrap(),
                             "-ex", format!("echo {}\n", &MARKER_BACKTRACE.end),
@@ -189,25 +203,41 @@ impl GdbTriager {
 
         let decoded_stdout = String::from_utf8_lossy(&output.stdout);
         let decoded_stderr = String::from_utf8_lossy(&output.stderr);
-        //println!("{}\n{}", decoded_stdout, decoded_stderr);
 
-        let child_output = match extract_marker(&decoded_stdout, &MARKER_CHILD_OUTPUT) {
-            Ok(output) => output,
-            Err(e) => return Err(format!("Could not extract child output: {}", e)),
+        if show_raw_output {
+            println!("--- RAW GDB OUTPUT ---\nGDB ARGS: {}\nPROGRAM ARGS: {}\nSTDOUT:\n{}\nSTDERR:\n{}\n",
+                gdb_args[..].join(" "), prog_args[..].join(" "), decoded_stdout, decoded_stderr);
+        }
+
+        let child_output_stdout = match extract_marker(&decoded_stdout, &MARKER_CHILD_OUTPUT) {
+            Ok(output) => output.to_string(),
+            Err(e) => return Err(format!("Could not extract child STDOUT: {}", e)),
+        };
+
+        let child_output_stderr = match extract_marker(&decoded_stderr, &MARKER_CHILD_OUTPUT) {
+            Ok(output) => output.to_string(),
+            Err(e) => return Err(format!("Could not extract child STDERR: {}", e)),
         };
 
         let backtrace_output = match extract_marker(&decoded_stdout, &MARKER_BACKTRACE) {
             Ok(output) => output,
-            Err(e) => return Err(format!("Failed to get triage info: {}", e)),
+            Err(e) => return Err(format!("Failed to get triage JSON from GDB: {}", e)),
         };
 
         let backtrace_json = match self.parse_response(backtrace_output) {
-            Ok(json) => return Ok(json),
-            Err(e) => return Err(format!("Failed to parse triage info: {}", e)),
+            Ok(json) => return Ok(GdbTriageResult {
+                thread_info: json,
+                child: GdbChildResult {
+                    stdout: child_output_stdout,
+                    stderr: child_output_stderr,
+                    status_code: 0
+                }
+            }),
+            Err(e) => return Err(format!("Failed to parse triage JSON from GDB: {}", e)),
         };
     }
 
-    fn parse_response(&self, resp: &str) -> serde_json::Result<GdbTriageResult> {
+    fn parse_response(&self, resp: &str) -> serde_json::Result<GdbThreadInfo> {
         serde_json::from_str(resp)
     }
 }
