@@ -4,13 +4,25 @@
 # 
 # GDB Triage to JSON Script
 # by Grant Hernandez
-import gdb
+import sys
+
+try:
+    import gdb
+except ImportError:
+    print("Script expected to be running from GDB that supports python")
+    sys.exit(1)
+
 import collections
 import json
+import re
 
 from pprint import pprint
 
 ModuleSection = collections.namedtuple("ModuleSection", ["name", "start", "end", "filename"])
+
+r_MAPPINGS = re.compile(r"(0x[a-fA-F0-9]+)\s+(0x[a-fA-F0-9]+)\s+(0x[a-fA-F0-9]+)\s+(0x[a-fA-F0-9]+)\s+(.*)")
+# 0xf7fd6114 - 0xf7fd6138 is .note.gnu.build-id in /lib/ld-linux.so.2
+r_FILE_INFO = re.compile(r"(0x[a-fA-F0-9]+) - (0x[a-fA-F0-9]+) is ([^\s]+)( in .*)?")
 
 """
 ######################
@@ -199,26 +211,61 @@ def get_module_sections():
     sections = []
     lines = gdb.execute("info files", to_string=True).splitlines()
 
+    start_addrs = {}
+
     for line in lines:
         line = line.strip()
 
-        if not line:
-            break
+        match = r_FILE_INFO.search(line)
 
-        if not line.startswith("0x"):
+        if not match:
             continue
 
-        blobs = [x.strip() for x in line.split(" ")]
-        addr_start = int(blobs[0], 16)
-        addr_end = int(blobs[2], 16)
-        section_name = blobs[4]
+        start, end, section_name, filename = match.groups()
 
-        if len(blobs) == 7:
-            filename = blobs[6]
-        else:
+        start = int(start, 16)
+        end = int(end, 16)
+
+        # we have a filename or DSO
+        if filename is None:
             filename = get_primary_module_path()
+        else:
+            filename = filename[len(" in "):]
 
-        sections += [ModuleSection(section_name, addr_start, addr_end, filename)]
+            # avoid capturing VDSO
+            if "system-supplied DSO" in filename:
+                continue
+
+        start_addrs[start] = 1
+        sections += [ModuleSection(section_name, start, end, filename)]
+
+    # `info files` can be missing info when the ELF file is fully stripped
+    lines = gdb.execute("info proc mappings", to_string=True).splitlines()
+
+    for line in lines:
+        line = line.strip()
+
+        # get every named section
+        match = r_MAPPINGS.search(line)
+
+        if not match:
+            continue
+
+        start, end, size, offset, name = match.groups()
+
+        start = int(start, 16)
+        end = int(end, 16)
+        size = int(size, 16)
+        offset = int(offset, 16)
+
+        if start in start_addrs:
+            continue
+
+        if name.strip() == "":
+            continue
+
+        mod = ModuleSection("", start, end, name)
+        sections += [mod]
 
     sections = sorted(sections, key=lambda x: x.start)
     sections_cache = sections
@@ -233,13 +280,6 @@ def main():
 
     bt = backtrace_all()
 
-    #for obj in gdb.objfiles():
-        #print(str(obj), str(obj.filename), str(obj.__dict__))
-    #for obj in gdb.progspaces():
-        #print(str(obj), str(obj.filename), str(obj.__dict__))
-
-    #pprint(get_module_sections())
-    #pprint(bt)
     print(json.dumps(bt))
 
 main()

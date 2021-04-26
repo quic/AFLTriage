@@ -190,9 +190,9 @@ impl GdbTriager {
                             "-ex", "set logging redirect off",
                             "-ex", "set logging off",
                             "-ex", format!("python [x.write('{}\\n') for x in [sys.stdout, sys.stderr]]", &MARKER_CHILD_OUTPUT.end),
-                            "-ex", format!("echo {}\n", &MARKER_BACKTRACE.start),
+                            "-ex", format!("python [x.write('{}\\n') for x in [sys.stdout, sys.stderr]]", &MARKER_BACKTRACE.start),
                             "-x", triage_script_path.to_str().unwrap(),
-                            "-ex", format!("echo {}\n", &MARKER_BACKTRACE.end),
+                            "-ex", format!("python [x.write('{}\\n') for x in [sys.stdout, sys.stderr]]", &MARKER_BACKTRACE.end),
                             "--args");
 
         let output = match process::execute_capture_output(&self.gdb, &[&gdb_args[..], &prog_args[..]].concat()) {
@@ -222,6 +222,15 @@ impl GdbTriager {
             Ok(output) => output,
             Err(e) => return Err(format!("Failed to get triage JSON from GDB: {}", e)),
         };
+
+        let backtrace_errors = match extract_marker(&decoded_stderr, &MARKER_BACKTRACE) {
+            Ok(output) => output,
+            Err(e) => return Err(format!("Failed to get triage errors from GDB: {}", e)),
+        };
+
+        if !backtrace_errors.is_empty() {
+            return Err(format!("Triage script emitted errors: {}", backtrace_errors))
+        }
 
         let backtrace_json = match self.parse_response(backtrace_output) {
             Ok(json) => return Ok(GdbTriageResult {
