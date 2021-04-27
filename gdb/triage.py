@@ -12,6 +12,7 @@ except ImportError:
     print("Script expected to be running from GDB that supports python")
     sys.exit(1)
 
+import copy
 import collections
 import json
 import re
@@ -66,6 +67,59 @@ def _solib_from_frame(frame):
 
     return symtab.objfile.filename
 
+files_with_bad_or_missing_code = {}
+
+def get_code_context(location, filename):
+    global files_with_bad_or_missing_code
+    if filename == "" or filename in files_with_bad_or_missing_code:
+        return None
+
+    if isinstance(location, int):
+        lines = gdb.execute("list *0x%x,*0x%x" % (location, location), to_string=True).splitlines()
+
+        if len(lines) < 2:
+            return None
+
+        header = lines[0]
+
+        if " is in " not in header:
+            files_with_bad_or_missing_code[filename] = 1
+            return None
+
+        line = lines[1]
+    else:
+        lines = gdb.execute("list %s,%s" % (location, location), to_string=True).splitlines()
+
+        if len(lines) < 1:
+            return None
+
+        line = lines[0]
+
+    # GDB list can still return lines even though there was an error
+    # Filter out common error cases
+    # will reject "warning: Source file is more recent than executable."
+    match = re.match("^([0-9]+)\s(.*)$", line)
+
+    if not match:
+        files_with_bad_or_missing_code[filename] = 1
+        return None
+
+    lineno = int(match.group(1))
+    code = match.group(2)
+
+    if filename:
+        # code not found
+        if ("in %s" % (filename)) in code:
+            files_with_bad_or_missing_code[filename] = 1
+            return None
+
+        # Some errorno print 
+        if ("%s:" % (filename)) in code:
+            files_with_bad_or_missing_code[filename] = 1
+            return None
+
+    return [code]
+
 def capture_backtrace(detailed=False):
     backtrace = []
     cframe = gdb.newest_frame()
@@ -80,20 +134,36 @@ def capture_backtrace(detailed=False):
 
         # TODO: this will probably break when executing from dynamically allocated memory
         frame_info["address"] = cframe.pc()
+        #frame_info["frame_type"] = frame_type_to_str(cframe.type())
 
         if section is not None:
             frame_info["relative_address"] = cframe.pc() - section.start
             frame_info["module"] = xstr(section.filename)
-            frame_info["pretty_address"] = '%s%s+0x%x'% (section.filename, section.name, frame_info["relative_address"])
+
+            if section.name != "":
+                frame_info["module_address"] = '%s (%s)+0x%x'% (section.filename, section.name, frame_info["relative_address"])
+            else:
+                frame_info["module_address"] = '%s+0x%x'% (section.filename, frame_info["relative_address"])
         else:
             frame_info["relative_address"] = cframe.pc()
             frame_info["module"] = "??"
-            frame_info["pretty_address"] = "0x%x" % (frame_info["relative_address"])
+            frame_info["module_address"] = "0x%x" % (frame_info["relative_address"])
 
-        sym = {}
+        sym_empty = {
+            'function_name': '',
+            'function_line': -1,
+            'mangled_function_name': '',
+            'function_signature': '',
+            'callsite': [],
+            'file': '',
+            'line': -1,
+            'args': [],
+            'locals': [],
+        }
+
+        sym = copy.deepcopy(sym_empty)
+
         sym["function_name"] = xstr(cframe.name())
-        sym["mangled_function_name"] = ''
-        sym["function_signature"] = ''
 
         # TODO: only include symbol information when we actually have symbols
         if fsym is not None:
@@ -110,6 +180,12 @@ def capture_backtrace(detailed=False):
 
             sym["function_signature"] = xstr(fsym.type)
 
+            # line information for inline functions is quite unreliable
+            # technically the inline function doesn't exist. only debugging
+            # information indicates that it is there
+            if cframe.type() != gdb.INLINE_FRAME:
+                sym["function_line"] = xint(fsym.line)
+
         sym["file"] = xstr(decorator.filename())
 
         if sym["file"] == frame_info["module"]:
@@ -117,35 +193,54 @@ def capture_backtrace(detailed=False):
 
         sym["line"] = xint(decorator.line())
 
-        frame_info["symbol"] = sym
-
-        frame_info["args"] = []
-        frame_info["locals"] = []
-
         if detailed:
+            try:
+                # make sure we can get a block. otherwise, there is no hope for listing code
+                cframe.block()
+
+                lookup = "%s:%d"% (sym["file"], sym["line"])
+                callsite = get_code_context(lookup, sym["file"])
+
+                if callsite:
+                    sym["callsite"] += callsite
+            except RuntimeError:
+                pass
+
             for v in xlist(decorator.frame_locals()):
                 info = {}
 
-                sym = v.sym
-                value = sym.value(cframe)
+                vsym = v.sym
+                value = vsym.value(cframe)
 
-                info["type"] = xstr(sym.type)
-                info["name"] = xstr(sym.print_name)
+                info["type"] = xstr(vsym.type)
+                info["name"] = xstr(vsym.print_name)
                 info["value"] = xstr(value)
 
-                frame_info["locals"] += [info]
+                sym["locals"] += [info]
 
             for v in xlist(decorator.frame_args()):
                 info = {}
 
-                sym = v.sym
-                value = sym.value(cframe)
+                vsym = v.sym
+                value = vsym.value(cframe)
 
-                info["type"] = xstr(sym.type)
-                info["name"] = xstr(sym.print_name)
+                info["type"] = xstr(vsym.type)
+                info["name"] = xstr(vsym.print_name)
                 info["value"] = xstr(value)
 
-                frame_info["args"] += [info]
+                sym["args"] += [info]
+
+        # don't include symbols or fields if they don't exist
+        if sym != sym_empty:
+            #print(pprint(sym), pprint(sym_empty))
+            frame_info["symbol"] = {}
+            for k, v in sym.items():
+                if v != sym_empty[k]:
+                    #print("ADD", k, v, sym_empty[k])
+                    frame_info["symbol"][k] = v
+
+            if "line" in frame_info["symbol"] and "file" not in frame_info["symbol"]:
+                del frame_info["symbol"]["line"]
 
         backtrace += [frame_info]
         cframe = cframe.older()
@@ -173,7 +268,7 @@ def backtrace_all():
 
         thread_info = {}
         thread_info["tid"] = xint(thread.num)
-        thread_info["backtrace"] = capture_backtrace()
+        thread_info["backtrace"] = capture_backtrace(True)
 
         gdb_state["threads"] += [thread_info]
 

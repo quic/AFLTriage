@@ -7,24 +7,88 @@ use std::path::PathBuf;
 use tempfile;
 use std::io::Write;
 
-use crate::process;
+use crate::process::{self, ChildResult};
 
 const INTERNAL_TRIAGE_SCRIPT: &[u8] = include_bytes!("../gdb/triage.py");
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, PartialEq, Deserialize)]
 pub struct GdbSymbol {
-    pub function_name: String,
-    pub mangled_function_name: String,
-    pub function_signature: String,
-    pub file: String,
-    pub line: i64
+    pub function_name: Option<String>,
+    pub function_line: Option<i64>,
+    pub mangled_function_name: Option<String>,
+    pub function_signature: Option<String>,
+    pub callsite: Option<Vec<String>>,
+    pub file: Option<String>,
+    pub line: Option<i64>,
+    pub args: Option<Vec<GdbVariable>>,
+    pub locals: Option<Vec<GdbVariable>>
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+impl GdbSymbol {
+    pub fn format(&self) -> String {
+        self.format_short()
+    }
+
+    pub fn format_short(&self) -> String {
+        return format!("{}", self.function_name.as_ref().unwrap_or(&"".to_string()));
+    }
+
+    pub fn format_function_prototype(&self) -> String {
+        let return_type = match &self.function_signature {
+            Some(rv) => {
+                match rv.find(" ") {
+                    Some(pos) => rv[..pos+1].to_string(),
+                    None => "".to_string(),
+                }
+            }
+            None => "".to_string(),
+        };
+
+        let args = if let Some(args) = &self.args {
+            args.iter().map(|x| x.format()).collect::<Vec<String>>().join(", ")
+        } else {
+            "".to_string()
+        };
+
+        return format!("{}{}({})", return_type, self.format_short(), args);
+    }
+
+    pub fn format_function_call(&self) -> String {
+        let args = if let Some(args) = &self.args {
+            args.iter().map(|x| x.name.as_str()).collect::<Vec<&str>>().join(", ")
+        } else {
+            "???".to_string()
+        };
+
+        return format!("{}({})", self.format_short(), args);
+    }
+
+    pub fn format_file(&self) -> String {
+        let mut filename = String::new();
+
+        if let Some(file) = &self.file {
+            filename += file;
+        }
+
+        if let Some(line) = &self.line {
+            filename += &format!(":{}", line);
+        }
+
+        filename
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct GdbVariable {
     pub r#type: String,
     pub name: String,
     pub value: String
+}
+
+impl GdbVariable {
+    pub fn format(&self) -> String {
+        format!("{} = ({}){}", self.name, self.r#type, self.value)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -32,10 +96,8 @@ pub struct GdbFrameInfo {
     pub address: i64,
     pub relative_address: i64,
     pub module: String,
-    pub pretty_address: String,
-    pub symbol: GdbSymbol,
-    pub args: Vec<GdbVariable>,
-    pub locals: Vec<GdbVariable>
+    pub module_address: String,
+    pub symbol: Option<GdbSymbol>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -51,16 +113,9 @@ pub struct GdbThreadInfo {
 }
 
 #[derive(Debug)]
-pub struct GdbChildResult {
-    pub stdout: String,
-    pub stderr: String,
-    pub status_code: i32
-}
-
-#[derive(Debug)]
 pub struct GdbTriageResult {
     pub thread_info: GdbThreadInfo,
-    pub child: GdbChildResult,
+    pub child: ChildResult,
 }
 
 macro_rules! vec_of_strings {
@@ -145,8 +200,8 @@ impl GdbTriager {
             }
         };
 
-        let decoded_stdout = String::from_utf8_lossy(&output.stdout);
-        let decoded_stderr = String::from_utf8_lossy(&output.stderr);
+        let decoded_stdout = &output.stdout;
+        let decoded_stderr = &output.stderr;
 
         let version = match decoded_stdout.find("V:") {
             Some(start_idx) => Some((&decoded_stdout[start_idx+2..]).lines().next().unwrap()),
@@ -200,30 +255,30 @@ impl GdbTriager {
             Err(e) => return Err(format!("Failed to execute GDB command: {}", e)),
         };
 
-        let decoded_stdout = String::from_utf8_lossy(&output.stdout);
-        let decoded_stderr = String::from_utf8_lossy(&output.stderr);
+        let decoded_stdout = &output.stdout;
+        let decoded_stderr = &output.stderr;
 
         if show_raw_output {
-            println!("--- RAW GDB OUTPUT ---\nGDB ARGS: {}\nPROGRAM ARGS: {}\nSTDOUT:\n{}\nSTDERR:\n{}\n",
+            println!("--- RAW GDB BEGIN ---\nGDB ARGS: {}\nPROGRAM ARGS: {}\nSTDOUT:\n{}\nSTDERR:\n{}\n--- RAW GDB END ---",
                 gdb_args[..].join(" "), prog_args[..].join(" "), decoded_stdout, decoded_stderr);
         }
 
-        let child_output_stdout = match extract_marker(&decoded_stdout, &MARKER_CHILD_OUTPUT) {
+        let child_output_stdout = match extract_marker(decoded_stdout, &MARKER_CHILD_OUTPUT) {
             Ok(output) => output.to_string(),
             Err(e) => return Err(format!("Could not extract child STDOUT: {}", e)),
         };
 
-        let child_output_stderr = match extract_marker(&decoded_stderr, &MARKER_CHILD_OUTPUT) {
+        let child_output_stderr = match extract_marker(decoded_stderr, &MARKER_CHILD_OUTPUT) {
             Ok(output) => output.to_string(),
             Err(e) => return Err(format!("Could not extract child STDERR: {}", e)),
         };
 
-        let backtrace_output = match extract_marker(&decoded_stdout, &MARKER_BACKTRACE) {
+        let backtrace_output = match extract_marker(decoded_stdout, &MARKER_BACKTRACE) {
             Ok(output) => output,
             Err(e) => return Err(format!("Failed to get triage JSON from GDB: {}", e)),
         };
 
-        let backtrace_errors = match extract_marker(&decoded_stderr, &MARKER_BACKTRACE) {
+        let backtrace_errors = match extract_marker(decoded_stderr, &MARKER_BACKTRACE) {
             Ok(output) => output,
             Err(e) => return Err(format!("Failed to get triage errors from GDB: {}", e)),
         };
@@ -235,11 +290,11 @@ impl GdbTriager {
         let backtrace_json = match self.parse_response(backtrace_output) {
             Ok(json) => return Ok(GdbTriageResult {
                 thread_info: json,
-                child: GdbChildResult {
+                child: ChildResult {
                     stdout: child_output_stdout,
                     stderr: child_output_stderr,
-                    status_code: 0
-                }
+                    status: output.status,
+                },
             }),
             Err(e) => return Err(format!("Failed to parse triage JSON from GDB: {}", e)),
         };

@@ -25,8 +25,10 @@ pub mod afl;
 pub mod util;
 pub mod process;
 pub mod gdb_triage;
+pub mod report;
 
-use gdb_triage::{GdbTriager, GdbTriageResult, GdbChildResult};
+use gdb_triage::{GdbTriager, GdbTriageResult};
+use process::ChildResult;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -91,16 +93,10 @@ fn setup_command_line() -> ArgMatches<'static> {
     return app.get_matches();
 }
 
-struct CrashReport {
-    headline: String,
-    backtrace: String,
-    stackhash: String
-}
-
 struct TestcaseResult<'a> {
     testcase: &'a str,
     result: TriageResult,
-    report: Option<CrashReport>
+    report: Option<report::CrashReport>
 }
 
 struct TriageState {
@@ -112,7 +108,7 @@ struct TriageState {
 }
 
 enum TriageResult {
-    NoCrash(GdbChildResult),
+    NoCrash(ChildResult),
     Crash(GdbTriageResult),
     Error(String)
 }
@@ -154,43 +150,6 @@ fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str, 
             return TriageResult::Crash(triage_result);
         }
     }
-}
-
-fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
-    let mut report = CrashReport {
-        headline: "".to_string(),
-        stackhash: "".to_string(),
-        backtrace: "".to_string(),
-    };
-
-    let crashing_tid = triage_result.thread_info.current_tid;
-
-    for thread in &triage_result.thread_info.threads {
-        if thread.tid == crashing_tid {
-            let frame_names = thread.backtrace.iter()
-                .map(|e| e.symbol.function_name.as_str())
-                .collect::<Vec<&str>>();
-
-            let frames = &thread.backtrace[0..];
-            let headline = format!("tid {} in {}",
-                     crashing_tid, frames.get(0).unwrap().symbol.function_name.as_str());
-
-            let mut major_hash = md5::Context::new();
-            let mut backtrace = String::new();
-
-            for (i, fr) in frames.iter().enumerate() {
-                major_hash.consume(fr.pretty_address.as_bytes());
-                backtrace += &format!("#{:<2} pc {:<08x} {} ({})\n",
-                    i, fr.address, fr.module, fr.symbol.function_name);
-            }
-
-            report.headline = headline;
-            report.stackhash = String::from(format!("{:x}", major_hash.compute()));
-            report.backtrace = backtrace;
-        }
-    }
-
-    report
 }
 
 enum UserInputPathType {
@@ -516,12 +475,18 @@ fn main() {
         let result = process_test_case(&gdb, &binary_args, path, debug);
 
         let report = match &result {
-            TriageResult::Crash(triage) => Some(format_text_report(&triage)),
+            TriageResult::Crash(triage) => Some(report::format_text_report(&triage)),
             _ => None,
         };
 
         // do very little with this lock held. do not reorder
         let mut state = state.lock().unwrap();
+
+        // TODO: display child-output even without a crash to help debug triage errors
+        /*if child_output {
+            println!("\nChild STDOUT:\n{}\n\nChild STDERR:\n{}\n",
+                child.stdout, child.stderr);
+        }*/
 
         match &result {
             TriageResult::NoCrash(child) => {
@@ -554,7 +519,7 @@ fn main() {
                         write_message(text_report);
                     } else {
                         let output_dir = output_dir.as_ref().unwrap();
-                        let report_filename = format!("{}_report.txt", testcase.unique_id);
+                        let report_filename = format!("afltriage_{}.txt", testcase.unique_id);
 
                         match std::fs::write(output_dir.join(report_filename), text_report) {
                             Err(e) => {
