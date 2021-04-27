@@ -214,7 +214,11 @@ def capture_backtrace(detailed=False):
 
                 info["type"] = xstr(vsym.type)
                 info["name"] = xstr(vsym.print_name)
-                info["value"] = xstr(value)
+
+                try:
+                    info["value"] = xstr(value)
+                except Exception as e:
+                    info["value"] = "<%s>" % (str(e))
 
                 sym["locals"] += [info]
 
@@ -226,7 +230,11 @@ def capture_backtrace(detailed=False):
 
                 info["type"] = xstr(vsym.type)
                 info["name"] = xstr(vsym.print_name)
-                info["value"] = xstr(value)
+
+                try:
+                    info["value"] = xstr(value)
+                except Exception as e:
+                    info["value"] = "<%s>" % (str(e))
 
                 sym["args"] += [info]
 
@@ -268,7 +276,7 @@ def backtrace_all():
 
         thread_info = {}
         thread_info["tid"] = xint(thread.num)
-        thread_info["backtrace"] = capture_backtrace(True)
+        thread_info["backtrace"] = capture_backtrace(detailed=True)
 
         gdb_state["threads"] += [thread_info]
 
