@@ -327,8 +327,9 @@ fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Tes
                     Ok(s) => {
                         match afl::validate_afl_fuzzer_stats(s) {
                             Ok(s2) => {
-                                println!(" ├─ AFL Banner: {}", s2.afl_banner);
-                                println!(" └─ AFL Version: {}", s2.afl_version);
+                                println!(" ├─ Banner: {}", s2.afl_banner);
+                                println!(" ├─ Command line: \"{}\"", s2.command_line);
+                                println!(" └─ Paths found: {}", s2.paths_total);
                                 Some(s2)
                             }
                             Err(e) => {
@@ -338,7 +339,7 @@ fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Tes
                         }
                     }
                     Err(e) => {
-                        println!("[!] AFL directory is missing fuzzer_stats: {}", e);
+                        println!("[!] AFL directory is missing fuzzer_stats");
                         None
                     }
                 };
@@ -378,7 +379,9 @@ fn main() {
         return
     }
 
-    println!("[+] Image triage cmdline: \"{}\"", binary_args.join(" "));
+    let binary_cmdline = binary_args.join(" ");
+
+    println!("[+] Image triage cmdline: \"{}\"", binary_cmdline);
 
     let output = args.value_of("output").unwrap();
 
@@ -499,27 +502,28 @@ fn main() {
 
                 state.crashed += 1;
 
-                write_message(format!("CRASH: {} {}", report.headline, testcase.unique_id));
+                write_message(format!("CRASH: {}", report.headline));
 
                 if !state.crash_signature.contains(&report.stackhash) {
                     state.crash_signature.insert(report.stackhash.to_string());
 
                     let mut text_report = format!(
-                        "--- REPORT BEGIN ---\nTestcase: {}\nStack hash: {}\n\n\n{}\n\nbacktrace:\n{}\n",
-                             path, report.stackhash, report.headline, report.backtrace);
+                        "Summary: {}\nCommand line: {}\nTestcase: {}\nStack hash: {}\n\nCrashing thread backtrace:\n{}\n",
+                             report.headline, binary_cmdline, path, report.stackhash, report.backtrace);
 
                     if child_output {
                         text_report += &format!("\nChild STDOUT:\n{}\n\nChild STDERR:\n{}\n",
                             triage.child.stdout, triage.child.stderr);
                     }
 
-                    text_report += "--- REPORT END ---";
-
                     if output_dir.is_none() {
+                        write_message("--- REPORT BEGIN ---".to_string());
                         write_message(text_report);
+                        write_message("--- REPORT END ---".to_string());
                     } else {
                         let output_dir = output_dir.as_ref().unwrap();
-                        let report_filename = format!("afltriage_{}.txt", testcase.unique_id);
+                        let report_filename = format!("afltriage_{}_{}.txt",
+                            util::sanitize(&report.crashing_function), &report.stackhash[..8]);
 
                         match std::fs::write(output_dir.join(report_filename), text_report) {
                             Err(e) => {

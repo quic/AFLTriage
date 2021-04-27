@@ -7,6 +7,7 @@ use std::cmp;
 
 pub struct CrashReport {
     pub headline: String,
+    pub crashing_function: String,
     pub backtrace: String,
     pub stackhash: String
 }
@@ -14,6 +15,7 @@ pub struct CrashReport {
 pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
     let mut report = CrashReport {
         headline: "".to_string(),
+        crashing_function: "".to_string(),
         stackhash: "".to_string(),
         backtrace: "".to_string(),
     };
@@ -31,29 +33,31 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
 
             let first_frame = frames.get(0).unwrap();
 
-            let headline = match &first_frame.symbol {
-                Some(symbol) => format!("tid {} in {}",
-                         crashing_tid, symbol.format()),
-                None => format!("tid {} in {:<08x}", crashing_tid, first_frame.address),
+            report.crashing_function = match &first_frame.symbol {
+                Some(symbol) => format!("{}", symbol.format()),
+                // TODO: align to word size, not 8
+                None => format!("0x{:<08x}", first_frame.address),
             };
+
+            report.headline = format!("tid {} in {}", crashing_tid, report.crashing_function);
 
             let mut major_hash = md5::Context::new();
             let mut backtrace = String::new();
 
             for (i, fr) in frames.iter().enumerate() {
-                let frame_header = format!("#{:<2} pc {:<08x}", i, fr.address);
-                let frame_module = format!("{} {}", frame_header, fr.module);
+                // TODO: align to word size, not 8
+                let frame_header = format!("#{:<2} {:<08x}", i, fr.address);
                 let frame_pad = frame_header.len() + 1;
 
                 major_hash.consume(fr.module_address.as_bytes());
 
                 match &fr.symbol {
                     Some(symbol) => {
-                        backtrace += &format!("{} ({})\n",
-                            frame_module, symbol.format());
+                        backtrace += &format!("{} in {} ({})\n",
+                            frame_header, symbol.format(), fr.module);
                     }
                     _ => {
-                        backtrace += &format!("{}\n", frame_module);
+                        backtrace += &format!("{} in {}+\n", frame_header, fr.module);
                     }
                 }
 
@@ -61,10 +65,6 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
                     Some(symbol) => {
                         let file_sym = symbol.format_file();
                         let mut ctx = vec![];
-
-                        if !file_sym.is_empty() {
-                            ctx.push(format!("in {}", file_sym));
-                        }
 
                         match &symbol.callsite {
                             Some(callsite) => {
@@ -96,18 +96,22 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
                             }
                         };
 
+                        if !file_sym.is_empty() {
+                            ctx.push(format!("at {}", file_sym));
+                        }
+
                         if !ctx.is_empty() {
                             for line in ctx {
                                 backtrace += &format!("{:pad$}", "", pad=frame_pad);
                                 backtrace += &format!("{}\n", line);
                             }
+                            backtrace += &format!("\n");
                         }
                     }
                     _ => ()
                 }
             }
 
-            report.headline = headline;
             report.stackhash = String::from(format!("{:x}", major_hash.compute()));
             report.backtrace = backtrace;
         }

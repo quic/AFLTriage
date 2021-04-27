@@ -74,6 +74,12 @@ def get_code_context(location, filename):
     if filename == "" or filename in files_with_bad_or_missing_code:
         return None
 
+    # Unfortunately due to a bug in GDB (I suspect)
+    # Listing source code with `list loc1,loc1` to get a single line, breaks on header files
+    # Hence we need to set the listsize 1. We don't want to open or interact with source code
+    # directly as we don't want to be responsible for possibly messing with its filesystem state
+    gdb.execute("set listsize 1", to_string=True)
+
     if isinstance(location, int):
         lines = gdb.execute("list *0x%x,*0x%x" % (location, location), to_string=True).splitlines()
 
@@ -88,7 +94,7 @@ def get_code_context(location, filename):
 
         line = lines[1]
     else:
-        lines = gdb.execute("list %s,%s" % (location, location), to_string=True).splitlines()
+        lines = gdb.execute("list %s" % (location), to_string=True).splitlines()
 
         if len(lines) < 1:
             return None
@@ -203,7 +209,7 @@ def capture_backtrace(detailed=False):
 
                 if callsite:
                     sym["callsite"] += callsite
-            except RuntimeError:
+            except RuntimeError as e:
                 pass
 
             for v in xlist(decorator.frame_locals()):

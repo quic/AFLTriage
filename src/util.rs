@@ -13,21 +13,21 @@ pub struct UniqueIdFactory {
     identifiers: HashSet<String>
 }
 
+pub fn sanitize(name: &str) -> String {
+    let mut s = ALLOWED_CHARS.replace_all(name, "_").to_string();
+    // TODO: sanitize entire string 
+    s.truncate(100);
+    return s
+}
+
 impl UniqueIdFactory {
     pub fn new() -> UniqueIdFactory {
         UniqueIdFactory { identifiers: HashSet::new() }
     }
 
-    fn sanitize(&self, name: String) -> String {
-        let mut s = ALLOWED_CHARS.replace_all(&name, "_").to_string();
-        // TODO: sanitize entire string 
-        s.truncate(200);
-        return s
-    }
-
     pub fn from_path(&mut self, path: &Path) -> String {
         let filename = match path.file_name() {
-            Some(name) => self.sanitize(name.to_string_lossy().to_string()),
+            Some(name) => sanitize(&name.to_string_lossy().to_string()),
             None => "".to_string()
         };
 
@@ -54,7 +54,7 @@ impl UniqueIdFactory {
         let parent = match path.parent() {
             Some(parent) => {
                 match parent.file_name() {
-                    Some(name) => self.sanitize(name.to_string_lossy().to_string()),
+                    Some(name) => sanitize(&name.to_string_lossy().to_string()),
                     None => "".to_string()
                 }
             }
