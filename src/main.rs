@@ -27,7 +27,7 @@ pub mod process;
 pub mod gdb_triage;
 pub mod report;
 
-use gdb_triage::{GdbTriager, GdbTriageResult};
+use gdb_triage::{GdbTriager, GdbTriageResult, GdbTriageError};
 use process::ChildResult;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
@@ -104,13 +104,13 @@ struct TriageState {
     no_crash: usize,
     errored: usize,
     crash_signature: HashSet<String>,
-    unique_errors: HashMap<String, usize>,
+    unique_errors: HashMap<GdbTriageError, usize>,
 }
 
 enum TriageResult {
     NoCrash(ChildResult),
     Crash(GdbTriageResult),
-    Error(String)
+    Error(GdbTriageError)
 }
 
 fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str, debug: bool) -> TriageResult {
@@ -127,7 +127,7 @@ fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str, 
     let triage_result = match gdb.triage_testcase(prog_args, debug) {
         Ok(triage_result) => triage_result,
         Err(e) => {
-            return TriageResult::Error(format!("Failed to triage: {}", e));
+            return TriageResult::Error(e);
         },
     };
 
@@ -145,7 +145,7 @@ fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str, 
         }
 
         if !found {
-            return TriageResult::Error("Crashing thread not found in backtrace".into());
+            return TriageResult::Error(GdbTriageError::new_brief("Crashing thread not found in backtrace"));
         } else {
             return TriageResult::Crash(triage_result);
         }
@@ -470,7 +470,7 @@ fn main() {
         unique_errors: HashMap::new(),
     }));
 
-    let results : Vec<TestcaseResult> = all_testcases.par_iter().map(|testcase| {
+    all_testcases.par_iter().for_each(|testcase| {
         let path = testcase.path.to_str().unwrap();
         let result = process_test_case(&gdb, &binary_args, path, debug);
 
@@ -488,7 +488,7 @@ fn main() {
                 child.stdout, child.stderr);
         }*/
 
-        match &result {
+        match result {
             TriageResult::NoCrash(child) => {
                 state.no_crash += 1;
 
@@ -532,30 +532,28 @@ fn main() {
                     }
                 }
             }
-            TriageResult::Error(msg) => {
+            TriageResult::Error(gdb_error) => {
                 state.errored += 1;
 
-                if let Some(x) = state.unique_errors.get_mut(msg) {
+                write_message(format!("ERROR: {}", gdb_error.error));
+
+                if let Some(x) = state.unique_errors.get_mut(&gdb_error) {
                     *x += 1
                 } else {
-                    state.unique_errors.insert(msg.to_string(), 1);
+                    state.unique_errors.insert(gdb_error, 1);
                 }
-
-                write_message(format!("ERROR: {}", msg));
             }
         };
 
         if display_progress {
             pb.inc(1);
         }
-
-        return TestcaseResult { testcase:path, result, report }
-    }).collect::<Vec<TestcaseResult>>();
+    });
 
     pb.finish_and_clear();
 
     let state = state.lock().unwrap();
-    let total = results.len();
+    let total = all_testcases.len();
 
     println!("[+] Triage stats [Crashes: {} (unique {}), No crash: {}, Errored: {}]",
         state.crashed, state.crash_signature.len(), state.no_crash, state.errored);
@@ -570,7 +568,27 @@ fn main() {
             state.errored, state.unique_errors.len());
 
         for (err, times) in &state.unique_errors {
-            println!("[X] Triage error: {} (seen {} times)", err, times);
+            let times = format!("(seen {} time(s))", times);
+
+            let msg: String = if err.details.is_empty() {
+                format!("{} {}", err.error, times)
+            } else if err.details.len() == 1 {
+                format!("{}: {} {}",
+                    err.error,
+                    err.details.get(0).unwrap().trim_end(),
+                    times)
+            } else {
+                let mut msg = format!("{} {}\n",
+                    err.error, times);
+
+                for (i, line) in err.details.iter().enumerate() {
+                    msg += &format!("{}: {}\n", i+1, line.trim_end())
+                }
+
+                msg
+            };
+
+            println!("[X] Triage error: {}", msg);
         }
     }
 

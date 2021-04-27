@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::path::PathBuf;
 use tempfile;
 use std::io::Write;
@@ -118,6 +117,35 @@ pub struct GdbTriageResult {
     pub child: ChildResult,
 }
 
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct GdbTriageError {
+    pub error: String,
+    pub details: Vec<String>,
+}
+
+impl GdbTriageError {
+    pub fn new(error: &str, extra_detail: String) -> GdbTriageError {
+        GdbTriageError {
+            error: error.to_string(),
+            details: vec![extra_detail]
+        }
+    }
+
+    pub fn new_brief(error: &str) -> GdbTriageError {
+        GdbTriageError {
+            error: error.to_string(),
+            details: Vec::new(),
+        }
+    }
+
+    pub fn new_detailed(error: &str, details: Vec<String>) -> GdbTriageError {
+        GdbTriageError {
+            error: error.to_string(),
+            details,
+        }
+    }
+}
+
 macro_rules! vec_of_strings {
     ($($x:expr),*) => (vec![$($x.to_string()),*]);
 }
@@ -224,10 +252,10 @@ impl GdbTriager {
         true
     }
 
-    pub fn triage_testcase(&self, prog_args: Vec<String>, show_raw_output: bool) -> Result<GdbTriageResult, String> {
+    pub fn triage_testcase(&self, prog_args: Vec<String>, show_raw_output: bool) -> Result<GdbTriageResult, GdbTriageError> {
         let triage_script_path = match &self.triage_script  {
             GdbTriageScript::Internal(tf) => tf.path(),
-            _ => return Err(format!("Unsupported triage script path")),
+            _ => return Err(GdbTriageError::new_brief("Unsupported triage script path")),
         };
 
         // TODO: timeout
@@ -252,7 +280,7 @@ impl GdbTriager {
 
         let output = match process::execute_capture_output(&self.gdb, &[&gdb_args[..], &prog_args[..]].concat()) {
             Ok(o) => o,
-            Err(e) => return Err(format!("Failed to execute GDB command: {}", e)),
+            Err(e) => return Err(GdbTriageError::new("Failed to execute GDB command", e.to_string())),
         };
 
         let decoded_stdout = &output.stdout;
@@ -265,26 +293,28 @@ impl GdbTriager {
 
         let child_output_stdout = match extract_marker(decoded_stdout, &MARKER_CHILD_OUTPUT) {
             Ok(output) => output.to_string(),
-            Err(e) => return Err(format!("Could not extract child STDOUT: {}", e)),
+            Err(e) => return Err(GdbTriageError::new("Could not extract child STDOUT", e.to_string())),
         };
 
         let child_output_stderr = match extract_marker(decoded_stderr, &MARKER_CHILD_OUTPUT) {
             Ok(output) => output.to_string(),
-            Err(e) => return Err(format!("Could not extract child STDERR: {}", e)),
+            Err(e) => return Err(GdbTriageError::new("Could not extract child STDERR", e.to_string())),
         };
 
         let backtrace_output = match extract_marker(decoded_stdout, &MARKER_BACKTRACE) {
             Ok(output) => output,
-            Err(e) => return Err(format!("Failed to get triage JSON from GDB: {}", e)),
+            Err(e) => return Err(GdbTriageError::new("Failed to get triage JSON from GDB", e.to_string())),
         };
 
-        let backtrace_errors = match extract_marker(decoded_stderr, &MARKER_BACKTRACE) {
+        let backtrace_messages = match extract_marker(decoded_stderr, &MARKER_BACKTRACE) {
             Ok(output) => output,
-            Err(e) => return Err(format!("Failed to get triage errors from GDB: {}", e)),
+            Err(e) => return Err(GdbTriageError::new("Failed to get triage errors from GDB", e.to_string())),
         };
 
-        if !backtrace_errors.is_empty() {
-            return Err(format!("Triage script emitted errors: {}", backtrace_errors))
+        if backtrace_output.is_empty() {
+            if !backtrace_messages.is_empty() {
+                return Err(GdbTriageError::new_detailed("Triage script emitted errors", backtrace_messages.lines().map(str::to_string).collect()))
+            }
         }
 
         let backtrace_json = match self.parse_response(backtrace_output) {
@@ -296,7 +326,7 @@ impl GdbTriager {
                     status: output.status,
                 },
             }),
-            Err(e) => return Err(format!("Failed to parse triage JSON from GDB: {}", e)),
+            Err(e) => return Err(GdbTriageError::new("Failed to parse triage JSON from GDB", e.to_string())),
         };
     }
 

@@ -49,7 +49,6 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
 
                 match &fr.symbol {
                     Some(symbol) => {
-                        println!("{:?}", symbol);
                         backtrace += &format!("{} ({})\n",
                             frame_module, symbol.format());
                     }
