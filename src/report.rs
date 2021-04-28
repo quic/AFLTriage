@@ -55,7 +55,10 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
                 let frame_header = format!("#{:<2} {:<08x}", i, fr.address);
                 let frame_pad = frame_header.len() + 1;
 
-                major_hash.consume(fr.module_address.as_bytes());
+                // don't consider the stack or heap for hashing
+                if fr.module != "[stack]" && fr.module != "[heap]" {
+                    major_hash.consume(fr.module_address.as_bytes());
+                }
 
                 match &fr.symbol {
                     Some(symbol) => {
