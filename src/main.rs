@@ -131,24 +131,10 @@ fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str, 
         },
     };
 
-    let crashing_tid = triage_result.thread_info.current_tid;
-
-    if crashing_tid == -1 {
+    if triage_result.thread_info.primary_thread.is_none() {
         return TriageResult::NoCrash(triage_result.child);
     } else {
-        let mut found = false;
-        for thread in &triage_result.thread_info.threads {
-            if thread.tid == crashing_tid {
-                found = true;
-                break
-            }
-        }
-
-        if !found {
-            return TriageResult::Error(GdbTriageError::new_brief("Crashing thread not found in backtrace"));
-        } else {
-            return TriageResult::Crash(triage_result);
-        }
+        return TriageResult::Crash(triage_result);
     }
 }
 

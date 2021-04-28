@@ -25,6 +25,9 @@ r_MAPPINGS = re.compile(r"(0x[a-fA-F0-9]+)\s+(0x[a-fA-F0-9]+)\s+(0x[a-fA-F0-9]+)
 # 0xf7fd6114 - 0xf7fd6138 is .note.gnu.build-id in /lib/ld-linux.so.2
 r_FILE_INFO = re.compile(r"(0x[a-fA-F0-9]+) - (0x[a-fA-F0-9]+) is ([^\s]+)( in .*)?")
 
+# Collect backtraces from all threads
+all_threads = False
+
 """
 ######################
 ## Utility functions
@@ -126,7 +129,7 @@ def get_code_context(location, filename):
 
     return lineno, code
 
-def capture_backtrace(detailed=False):
+def capture_backtrace(primary=True, detailed=False):
     backtrace = []
     cframe = gdb.newest_frame()
 
@@ -275,25 +278,33 @@ def backtrace_all():
 
     gdb_state = {}
 
-    gdb_state["current_tid"] = -1
-    gdb_state["threads"] = []
-
     if primary_thread is None:
         # TODO: return error message
         return gdb_state
 
-    gdb_state["current_tid"] = xint(primary_thread.num)
+    pri_thread_info = {}
+    pri_thread_info["tid"] = xint(primary_thread.num)
+    pri_thread_info["backtrace"] = capture_backtrace(primary=True, detailed=True)
+    gdb_state["primary_thread"] = pri_thread_info
 
-    infe = gdb.selected_inferior()
+    if all_threads:
+        infe = gdb.selected_inferior()
 
-    for thread in sorted(xlist(infe.threads()), key=lambda x: x.num):
-        thread.switch()
+        threads = []
+        for thread in sorted(xlist(infe.threads()), key=lambda x: x.num):
+            if thread.num == primary_thread.num:
+                continue
 
-        thread_info = {}
-        thread_info["tid"] = xint(thread.num)
-        thread_info["backtrace"] = capture_backtrace(detailed=True)
+            thread.switch()
 
-        gdb_state["threads"] += [thread_info]
+            thread_info = {}
+            thread_info["tid"] = xint(thread.num)
+            thread_info["backtrace"] = capture_backtrace(primary=False, detailed=False)
+
+            threads += [thread_info]
+
+        if threads:
+            gdb_state["threads"] = threads
 
     return gdb_state
 

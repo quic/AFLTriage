@@ -111,8 +111,8 @@ pub struct GdbThread {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GdbThreadInfo {
-    pub current_tid: i32,
-    pub threads: Vec<GdbThread>,
+    pub primary_thread: Option<GdbThread>,
+    pub threads: Option<Vec<GdbThread>>,
 }
 
 #[derive(Debug)]
