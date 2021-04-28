@@ -2,8 +2,12 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 use crate::GdbTriageResult;
-
+use regex::Regex;
 use std::cmp;
+
+lazy_static! {
+    static ref r_CIDENT: Regex = Regex::new(r#"[_a-zA-Z][_a-zA-Z0-9]{0,30}"#).unwrap();
+}
 
 pub struct CrashReport {
     pub headline: String,
@@ -82,10 +86,27 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
                                                 "", symbol.format_function_prototype(), pad=pad)),
                                 }
 
-                                ctx.push(format!("{:.<pad$}:", "", pad=pad));
-                                ctx.push(format!("{:>pad$}: {}", lineno, callsite.get(0).unwrap(), pad=pad));
-                                ctx.push(format!("{:.<pad$}:", "", pad=pad));
-                                ctx.push(format!("{:.<pad$}: }}", "", pad=pad));
+                                let code = callsite.get(0).unwrap();
+
+                                match &symbol.locals {
+                                    Some(locals) => {
+                                        for local in locals {
+                                            for ident in r_CIDENT.find_iter(code) {
+                                                if ident.as_str() == local.name {
+                                                    ctx.push(format!("{:|<pad$}: /* Local reference: {} */", "",
+                                                            local.format_decl(), pad=pad));
+                                                    break
+                                                }
+                                            }
+                                        }
+                                    }
+                                    _ => ()
+                                }
+
+                                ctx.push(format!("{:|<pad$}:", "", pad=pad));
+                                ctx.push(format!("{:>pad$}: {}", lineno, code, pad=pad));
+                                ctx.push(format!("{:|<pad$}:", "", pad=pad));
+                                ctx.push(format!("{:-<pad$}: }}", "", pad=pad));
                             }
                             None =>  {
                                 // we likely only have the function name, but this is printed

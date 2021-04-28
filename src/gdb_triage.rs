@@ -44,7 +44,7 @@ impl GdbSymbol {
         };
 
         let args = if let Some(args) = &self.args {
-            args.iter().map(|x| x.format()).collect::<Vec<String>>().join(", ")
+            args.iter().map(|x| x.format_arg()).collect::<Vec<String>>().join(", ")
         } else {
             "".to_string()
         };
@@ -85,8 +85,12 @@ pub struct GdbVariable {
 }
 
 impl GdbVariable {
-    pub fn format(&self) -> String {
+    pub fn format_arg(&self) -> String {
         format!("{} = ({}){}", self.name, self.r#type, self.value)
+    }
+
+    pub fn format_decl(&self) -> String {
+        format!("{} {} = {};", self.r#type, self.name, self.value)
     }
 }
 
