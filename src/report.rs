@@ -55,8 +55,16 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
                 let frame_header = format!("#{:<2} {:<08x}", i, fr.address);
                 let frame_pad = frame_header.len() + 1;
 
-                // don't consider the stack or heap for hashing
-                if fr.module != "[stack]" && fr.module != "[heap]" {
+                let file_sym = match &fr.symbol {
+                    Some(symbol) => symbol.format_file(),
+                    None => "".to_string(),
+                };
+
+                // if we have a file symbol with a line, use it for hashing
+                if !file_sym.is_empty() && file_sym.contains(":") {
+                    major_hash.consume(file_sym.as_bytes());
+                } else if fr.module != "[stack]" && fr.module != "[heap]" {
+                    // don't consider the stack or heap for hashing
                     major_hash.consume(fr.module_address.as_bytes());
                 }
 
@@ -66,13 +74,12 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
                             frame_header, symbol.format(), fr.module);
                     }
                     _ => {
-                        backtrace += &format!("{} in {}+\n", frame_header, fr.module);
+                        backtrace += &format!("{} in {}\n", frame_header, fr.module);
                     }
                 }
 
                 match &fr.symbol {
                     Some(symbol) => {
-                        let file_sym = symbol.format_file();
                         let mut ctx = vec![];
 
                         match &symbol.callsite {
