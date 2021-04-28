@@ -25,6 +25,11 @@ r_MAPPINGS = re.compile(r"(0x[a-fA-F0-9]+)\s+(0x[a-fA-F0-9]+)\s+(0x[a-fA-F0-9]+)
 # 0xf7fd6114 - 0xf7fd6138 is .note.gnu.build-id in /lib/ld-linux.so.2
 r_FILE_INFO = re.compile(r"(0x[a-fA-F0-9]+) - (0x[a-fA-F0-9]+) is ([^\s]+)( in .*)?")
 
+#  Name         Nr  Rel Offset    Size  Type            Groups
+# eax           0    0      0       4 int32_t         general,all,save,restore
+r_REGISTER_LIST = re.compile(r"([^\s]+)\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)\s+([^\s]+)\s+([^\s]+)")
+r_REGISTER_VALUES = re.compile(r"([^\s]+)\s+(0x[a-fA-F0-9]+)\s+(.*)")
+
 # Collect backtraces from all threads
 all_threads = False
 
@@ -71,6 +76,114 @@ def _solib_from_frame(frame):
     return symtab.objfile.filename
 
 files_with_bad_or_missing_code = {}
+
+register_metadata = None
+register_groups = None
+
+def get_register_list():
+    global register_metadata
+    global register_groups
+
+    if register_metadata:
+        return register_metadata
+
+    register_metadata = {}
+    register_groups = {}
+
+    lines = gdb.execute("maint print register-groups", to_string=True).splitlines()
+
+    # skip header
+    for line in lines[1:]:
+        match = r_REGISTER_LIST.search(line)
+
+        if not match:
+            continue
+
+        name, number, rel, offset, size, ty, groups = match.groups()
+
+        number = int(number)
+        rel = int(rel)
+        offset = int(offset)
+        size = int(size)
+
+        if size == 0:
+            continue
+
+        groups = groups.split(",")
+
+        rinfo = {
+            "number": number,
+            "rel": rel,
+            "offset": offset,
+            "size": size,
+            "type": ty,
+            "groups": groups
+        }
+
+        for g in groups:
+            if g not in register_groups:
+                register_groups[g] = [name]
+            else:
+                register_groups[g] += [name]
+
+        register_metadata[name] = rinfo
+
+    return register_metadata
+
+def get_register_groups():
+    if register_groups:
+        return register_groups
+
+    get_register_list()
+    return register_groups
+
+def get_primary_register_list():
+    groups = get_register_groups()
+
+    if "general" not in groups:
+        return []
+
+    return groups["general"]
+
+def get_primary_register_values():
+    primary_regs = get_primary_register_list()
+
+    lines = gdb.execute("info registers general", to_string=True).splitlines()
+
+    registers = []
+
+    for line in lines:
+        match = r_REGISTER_VALUES.search(line)
+
+        if not match:
+            continue
+
+        name, hexval, pretty = match.groups()
+
+        hexval = int(hexval, 16)
+
+        if name not in primary_regs:
+            continue
+
+        rmeta = get_register_metadata(name)
+        rinfo = {
+            "name": name,
+            "value": hexval,
+            "pretty_value": pretty,
+            "type": rmeta["type"],
+            "size": rmeta["size"],
+        }
+
+        registers += [rinfo]
+
+    return registers
+
+def get_register_metadata(name):
+    meta = get_register_list()
+    if name not in meta:
+        return None
+    else:
+        return meta[name]
 
 def get_code_context(location, filename):
     global files_with_bad_or_missing_code
@@ -273,6 +386,15 @@ def capture_backtrace(primary=True, detailed=False):
 
     return backtrace
 
+def get_instruction_at(pc):
+    try:
+        instruction = gdb.execute("x/1i 0x%x" % (pc), to_string=True).splitlines()[0].rstrip()
+        return instruction
+    except gdb.error:
+        return None
+    except gdb.MemoryError:
+        return None
+
 def backtrace_all():
     primary_thread = gdb.selected_thread()
 
@@ -285,6 +407,18 @@ def backtrace_all():
     pri_thread_info = {}
     pri_thread_info["tid"] = xint(primary_thread.num)
     pri_thread_info["backtrace"] = capture_backtrace(primary=True, detailed=True)
+
+    regs = get_primary_register_values()
+    if regs:
+        pri_thread_info["registers"] = regs
+
+    if len(pri_thread_info["backtrace"]):
+        first_frame = pri_thread_info["backtrace"][0]
+        insn = get_instruction_at(first_frame["address"])
+
+        if insn:
+            pri_thread_info["current_instruction"] = insn
+
     gdb_state["primary_thread"] = pri_thread_info
 
     if all_threads:

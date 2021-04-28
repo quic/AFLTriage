@@ -106,13 +106,31 @@ pub struct GdbFrameInfo {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GdbThread {
     pub tid: i32,
-    pub backtrace: Vec<GdbFrameInfo>
+    pub backtrace: Vec<GdbFrameInfo>,
+    pub current_instruction: Option<String>,
+    pub registers: Option<Vec<GdbRegister>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GdbRegister {
+    pub name: String,
+    pub value: u64,
+    pub pretty_value: String,
+    pub r#type: String,
+    pub size: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GdbFaultInfo {
+    pub signal: i32,
+    pub si_code: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GdbThreadInfo {
     pub primary_thread: Option<GdbThread>,
     pub threads: Option<Vec<GdbThread>>,
+    pub fault_info: Option<GdbFaultInfo>,
 }
 
 #[derive(Debug)]

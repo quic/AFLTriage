@@ -54,7 +54,19 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
     let mut major_hash = md5::Context::new();
     let mut backtrace = String::new();
 
+    if let Some(registers) = &primary_thread.registers {
+        for reg in registers {
+            backtrace += &format!("{} - 0x{:<08x} ({})\n", reg.name, reg.value, reg.pretty_value);
+        }
+    }
+
     for (i, fr) in frames.iter().enumerate() {
+        if i == 0 {
+            if let Some(insn) = &primary_thread.current_instruction {
+                backtrace += &format!("Faulting instruction: {}\n", insn);
+            }
+        }
+
         // TODO: align to word size, not 8
         let frame_header = format!("#{:<2} {:<08x}", i, fr.address);
         let frame_pad = frame_header.len() + 1;
