@@ -77,7 +77,7 @@ impl GdbSymbol {
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GdbVariable {
     pub r#type: String,
     pub name: String,

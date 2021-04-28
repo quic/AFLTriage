@@ -1,12 +1,14 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
+use std::collections::HashSet;
 use crate::GdbTriageResult;
+use crate::util::elide_size;
 use regex::Regex;
 use std::cmp;
 
 lazy_static! {
-    static ref r_CIDENT: Regex = Regex::new(r#"[_a-zA-Z][_a-zA-Z0-9]{0,30}"#).unwrap();
+    static ref R_CIDENT: Regex = Regex::new(r#"[_a-zA-Z][_a-zA-Z0-9]{0,30}"#).unwrap();
 }
 
 pub struct CrashReport {
@@ -90,12 +92,29 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
 
                                 match &symbol.locals {
                                     Some(locals) => {
+                                        let mut locals_left = HashSet::new();
+
                                         for local in locals {
-                                            for ident in r_CIDENT.find_iter(code) {
-                                                if ident.as_str() == local.name {
-                                                    ctx.push(format!("{:|<pad$}: /* Local reference: {} */", "",
-                                                            local.format_decl(), pad=pad));
-                                                    break
+                                            locals_left.insert(local);
+                                        }
+
+                                        for code in callsite {
+                                            if locals_left.is_empty() {
+                                                break
+                                            }
+
+                                            for local in locals_left.clone() {
+                                                // search for all C-like identifiers and compare them
+                                                // hacky but avoids false positives when checking
+                                                // locals with single character names
+                                                for ident in R_CIDENT.find_iter(code) {
+                                                    if ident.as_str() == local.name {
+                                                        locals_left.remove(local);
+
+                                                        ctx.push(format!("{:|<pad$}: /* Local reference: {} */", "",
+                                                                elide_size(&local.format_decl(), 200), pad=pad));
+                                                        break
+                                                    }
                                                 }
                                             }
                                         }
@@ -104,7 +123,11 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
                                 }
 
                                 ctx.push(format!("{:|<pad$}:", "", pad=pad));
-                                ctx.push(format!("{:>pad$}: {}", lineno, code, pad=pad));
+                                for (i, code) in callsite.iter().enumerate() {
+                                    // context always comes before the line
+                                    ctx.push(format!("{:>pad$}: {}",
+                                            (symbol.line.unwrap() as usize)-callsite.len()+i+1, code, pad=pad));
+                                }
                                 ctx.push(format!("{:|<pad$}:", "", pad=pad));
                                 ctx.push(format!("{:-<pad$}: }}", "", pad=pad));
                             }

@@ -13,6 +13,20 @@ pub struct UniqueIdFactory {
     identifiers: HashSet<String>
 }
 
+pub fn elide_size(s: &str, size: usize) -> String {
+    if size < 3 {
+        return format!("...")
+    }
+
+    let new_size = size - 3;
+
+    if s.len() > new_size {
+        return format!("{}...", &s[..new_size])
+    } else {
+        return s.to_string()
+    }
+}
+
 pub fn sanitize(name: &str) -> String {
     let mut s = ALLOWED_CHARS.replace_all(name, "_").to_string();
     // TODO: sanitize entire string 

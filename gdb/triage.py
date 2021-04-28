@@ -124,7 +124,7 @@ def get_code_context(location, filename):
             files_with_bad_or_missing_code[filename] = 1
             return None
 
-    return [code]
+    return lineno, code
 
 def capture_backtrace(detailed=False):
     backtrace = []
@@ -203,12 +203,21 @@ def capture_backtrace(detailed=False):
             try:
                 # make sure we can get a block. otherwise, there is no hope for listing code
                 cframe.block()
+                ctx_lines = 3
 
-                lookup = "%s:%d"% (sym["file"], sym["line"])
-                callsite = get_code_context(lookup, sym["file"])
+                for i in range(max(sym["line"]-ctx_lines+1, 1), sym["line"]+1):
+                    lookup = "%s:%d"% (sym["file"], i)
+                    result = get_code_context(lookup, sym["file"])
 
-                if callsite:
-                    sym["callsite"] += callsite
+                    if result is None:
+                        break
+
+                    lineno, code = result
+
+                    if lineno != i:
+                        break
+
+                    sym["callsite"] += [code.rstrip()]
             except RuntimeError as e:
                 pass
 
