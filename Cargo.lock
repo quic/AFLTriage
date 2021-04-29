@@ -10,6 +10,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "md5",
+ "num_cpus",
  "num_enum",
  "rayon",
  "regex",

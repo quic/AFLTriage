@@ -20,6 +20,7 @@ extern crate lazy_static;
 
 #[macro_use]
 extern crate clap;
+extern crate num_cpus;
 
 pub mod afl;
 pub mod util;
@@ -72,6 +73,10 @@ fn setup_command_line() -> ArgMatches<'static> {
                                .takes_value(true)
                                .required(true)
                                .help("The output path for triage report files. Use '-' to print to console."))
+                          .arg(Arg::with_name("jobs")
+                               .short("-j")
+                               .takes_value(true)
+                               .help("How many threads to use during triage."))
                           .arg(Arg::with_name("debug")
                                .long("--debug")
                                .help("Enable low-level debugging of triage operations."))
@@ -424,8 +429,10 @@ fn main() {
     let debug = args.is_present("debug");
     let child_output = args.is_present("child_output");
 
-    let requested_job_count = 20;
-    let job_count = std::cmp::min(requested_job_count, all_testcases.len());
+    let requested_job_count = value_t!(args, "jobs", usize).unwrap_or_else(|e| num_cpus::get() / 2); 
+    let job_count = std::cmp::max(1, std::cmp::min(requested_job_count, all_testcases.len()));
+
+    println!("[+] Using {} threads to triage", job_count);
 
     // TODO: -n flag for parallelism
     rayon::ThreadPoolBuilder::new().num_threads(job_count).build_global().unwrap();
