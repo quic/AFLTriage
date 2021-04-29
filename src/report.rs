@@ -2,8 +2,9 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 use std::collections::HashSet;
-use crate::GdbTriageResult;
+use crate::gdb_triage::{GdbTriageResult, GdbContextInfo};
 use crate::util::elide_size;
+use crate::platform::linux::si_code_to_string;
 use regex::Regex;
 use std::cmp;
 
@@ -15,6 +16,8 @@ pub struct CrashReport {
     pub headline: String,
     pub crashing_function: String,
     pub backtrace: String,
+    pub crash_context: String,
+    pub register_info: String,
     pub stackhash: String
 }
 
@@ -23,16 +26,13 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
         headline: "".to_string(),
         crashing_function: "".to_string(),
         stackhash: "".to_string(),
+        crash_context: "".to_string(),
+        register_info: "".to_string(),
         backtrace: "".to_string(),
     };
 
-    let primary_thread = triage_result.thread_info.primary_thread.as_ref().unwrap();
-
-    /*for thread in &triage_result.thread_info.threads {
-        if thread.tid != crashing_tid {
-            continue
-        }
-    }*/
+    let ctx_info: &GdbContextInfo = triage_result.response.result.as_ref().unwrap();
+    let primary_thread = &ctx_info.primary_thread;
 
     let frames = &primary_thread.backtrace[0..];
 
@@ -49,24 +49,51 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
         None => format!("0x{:<08x}", first_frame.address),
     };
 
-    report.headline = format!("tid {} in {}", primary_thread.tid, report.crashing_function);
+    let stop_info = &ctx_info.stop_info;
+
+    //report.crash_context += &format!("{:?}\n", stop_info);
+    let signal_info = format!("{} (si_signo={})", stop_info.signal, stop_info.signal_number);
+    let signal_code_info = format!("{} (si_code={})",
+    si_code_to_string(&stop_info.signal, stop_info.signal_code as i8), stop_info.signal_code);
+
+    let fault_address = match &stop_info.faulting_address {
+        Some(addr) => format!(" due to a fault at or near 0x{:<08x}", addr),
+        None => "".to_string()
+    };
+
+    report.headline = format!("Program received {} / {} in {}{}",
+        signal_info,
+        signal_code_info,
+        report.crashing_function,
+        fault_address
+    );
 
     let mut major_hash = md5::Context::new();
     let mut backtrace = String::new();
 
     if let Some(registers) = &primary_thread.registers {
         for reg in registers {
-            backtrace += &format!("{} - 0x{:<08x} ({})\n", reg.name, reg.value, reg.pretty_value);
+            report.register_info += &format!("{} - 0x{:<08x} ({})\n", reg.name, reg.value, reg.pretty_value);
         }
     }
 
-    for (i, fr) in frames.iter().enumerate() {
-        if i == 0 {
-            if let Some(insn) = &primary_thread.current_instruction {
-                backtrace += &format!("Faulting instruction: {}\n", insn);
+    if let Some(insn) = &primary_thread.current_instruction {
+
+        if let Some(registers) = &primary_thread.registers {
+            for ident in R_CIDENT.find_iter(insn) {
+                for reg in registers {
+                    if ident.as_str() == reg.name {
+                        report.crash_context += &format!("{} = {:<08x}\n", reg.name, reg.value);
+                        break
+                    }
+                }
             }
         }
 
+        report.crash_context += &format!("Execution stopped here ==> {:<08x}: {}\n", first_frame.address, insn);
+    }
+
+    for (i, fr) in frames.iter().enumerate() {
         // TODO: align to word size, not 8
         let frame_header = format!("#{:<2} {:<08x}", i, fr.address);
         let frame_pad = frame_header.len() + 1;
@@ -187,4 +214,3 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
 
     report
 }
-

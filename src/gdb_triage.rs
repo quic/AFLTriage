@@ -121,21 +121,29 @@ pub struct GdbRegister {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct GdbFaultInfo {
-    pub signal: i32,
-    pub si_code: i32,
+pub struct GdbStopInfo {
+    pub signal: String,
+    pub signal_number: i32, // si_signo
+    pub signal_code: i32, // si_code
+    pub faulting_address: Option<u64>, // sigfault.si_addr
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct GdbThreadInfo {
-    pub primary_thread: Option<GdbThread>,
-    pub threads: Option<Vec<GdbThread>>,
-    pub fault_info: Option<GdbFaultInfo>,
+pub struct GdbContextInfo {
+    pub stop_info: GdbStopInfo,
+    pub primary_thread: GdbThread,
+    pub other_threads: Option<Vec<GdbThread>>,
+}
+
+// can be blank ({}) meaning error or target exited
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GdbJsonResult {
+    pub result: Option<GdbContextInfo>,
 }
 
 #[derive(Debug)]
 pub struct GdbTriageResult {
-    pub thread_info: GdbThreadInfo,
+    pub response: GdbJsonResult,
     pub child: ChildResult,
 }
 
@@ -341,7 +349,7 @@ impl GdbTriager {
 
         let backtrace_json = match self.parse_response(backtrace_output) {
             Ok(json) => return Ok(GdbTriageResult {
-                thread_info: json,
+                response: json,
                 child: ChildResult {
                     stdout: child_output_stdout,
                     stderr: child_output_stderr,
@@ -352,7 +360,7 @@ impl GdbTriager {
         };
     }
 
-    fn parse_response(&self, resp: &str) -> serde_json::Result<GdbThreadInfo> {
+    fn parse_response(&self, resp: &str) -> serde_json::Result<GdbJsonResult> {
         serde_json::from_str(resp)
     }
 }

@@ -26,6 +26,7 @@ pub mod util;
 pub mod process;
 pub mod gdb_triage;
 pub mod report;
+pub mod platform;
 
 use gdb_triage::{GdbTriager, GdbTriageResult, GdbTriageError};
 use process::ChildResult;
@@ -124,14 +125,14 @@ fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str, 
         }
     }
 
-    let triage_result = match gdb.triage_testcase(prog_args, debug) {
+    let triage_result: GdbTriageResult = match gdb.triage_testcase(prog_args, debug) {
         Ok(triage_result) => triage_result,
         Err(e) => {
             return TriageResult::Error(e);
         },
     };
 
-    if triage_result.thread_info.primary_thread.is_none() {
+    if triage_result.response.result.is_none() {
         return TriageResult::NoCrash(triage_result.child);
     } else {
         return TriageResult::Crash(triage_result);
@@ -494,8 +495,12 @@ fn main() {
                     state.crash_signature.insert(report.stackhash.to_string());
 
                     let mut text_report = format!(
-                        "Summary: {}\nCommand line: {}\nTestcase: {}\nStack hash: {}\n\nCrashing thread backtrace:\n{}\n",
-                             report.headline, binary_cmdline, path, report.stackhash, report.backtrace);
+                        "Summary: {}\nCommand line: {}\nTestcase: {}\nStack hash: {}\n\n",
+                             report.headline, binary_cmdline, path, report.stackhash);
+
+                    text_report += &format!("Register info:\n{}\n", report.register_info);
+                    text_report += &format!("Crash context:\n{}\n", report.crash_context);
+                    text_report += &format!("Crashing thread backtrace:\n{}\n", report.backtrace);
 
                     if child_output {
                         text_report += &format!("\nChild STDOUT:\n{}\n\nChild STDERR:\n{}\n",

@@ -190,12 +190,6 @@ def get_code_context(location, filename):
     if filename == "" or filename in files_with_bad_or_missing_code:
         return None
 
-    # Unfortunately due to a bug in GDB (I suspect)
-    # Listing source code with `list loc1,loc1` to get a single line, breaks on header files
-    # Hence we need to set the listsize 1. We don't want to open or interact with source code
-    # directly as we don't want to be responsible for possibly messing with its filesystem state
-    gdb.execute("set listsize 1", to_string=True)
-
     if isinstance(location, int):
         lines = gdb.execute("list *0x%x,*0x%x" % (location, location), to_string=True).splitlines()
 
@@ -388,12 +382,47 @@ def capture_backtrace(primary=True, detailed=False):
 
 def get_instruction_at(pc):
     try:
-        instruction = gdb.execute("x/1i 0x%x" % (pc), to_string=True).splitlines()[0].rstrip()
-        return instruction
+        insn = gdb.execute("x/1i 0x%x" % (pc), to_string=True).splitlines()[0]
+        delim = insn.rfind(":")
+
+        if delim == -1:
+            return None
+
+        insn = insn[delim+1:]
+
+        return insn.strip()
     except gdb.error:
         return None
     except gdb.MemoryError:
         return None
+
+def get_stop_info():
+    lines = gdb.execute("info program", to_string=True).splitlines()
+    signal_name = "SIGUNKNOWN"
+
+    for line in lines:
+        if "It stopped at breakpoint" in line:
+            signal_name = "SIGTRAP"
+            break
+
+        match = re.match(r"^It stopped with signal (SIG[^\s,]+),", line)
+        if match:
+            signal_name = match.group(1)
+            break
+
+    try:
+        signo = int(gdb.parse_and_eval("$_siginfo.si_signo"))
+        sicode = int(gdb.parse_and_eval("$_siginfo.si_code"))
+
+        sinfo =  {"signal": signal_name, "signal_number": signo, "signal_code": sicode}
+
+        # https://man7.org/linux/man-pages/man2/sigaction.2.html
+        if signal_name in ["SIGSEGV", "SIGILL", "SIGBUS", "SIGFPE", "SIGTRAP"]:
+            sinfo["faulting_address"] = int(gdb.parse_and_eval("$_siginfo._sifields._sigfault.si_addr"))
+    except gdb.error:
+        return None
+
+    return sinfo
 
 def backtrace_all():
     primary_thread = gdb.selected_thread()
@@ -403,6 +432,14 @@ def backtrace_all():
     if primary_thread is None:
         # TODO: return error message
         return gdb_state
+
+    stop_info = get_stop_info()
+
+    # we must have stop info
+    if not stop_info:
+        return gdb_state
+
+    gdb_state["stop_info"] = stop_info
 
     pri_thread_info = {}
     pri_thread_info["tid"] = xint(primary_thread.num)
@@ -421,6 +458,7 @@ def backtrace_all():
 
     gdb_state["primary_thread"] = pri_thread_info
 
+    # having extra thread information is optional
     if all_threads:
         infe = gdb.selected_inferior()
 
@@ -438,7 +476,7 @@ def backtrace_all():
             threads += [thread_info]
 
         if threads:
-            gdb_state["threads"] = threads
+            gdb_state["other_threads"] = threads
 
     return gdb_state
 
@@ -541,8 +579,24 @@ def main():
     if not hasattr(gdb, "FrameDecorator"):
         raise ImportError("GDB 7.10 and above must be used")
 
+    # Unfortunately due to a bug in GDB (I suspect)
+    # Listing source code with `list loc1,loc1` to get a single line, breaks on header files
+    # Hence we need to set the listsize 1. We don't want to open or interact with source code
+    # directly as we don't want to be responsible for possibly messing with its filesystem state
+    gdb.execute("set listsize 1", to_string=True)
+
+    # TODO: only do this on i386/x86_64
+    gdb.execute("set disassembly-flavor intel", to_string=True)
+
+    # TODO: undo "set"'s to restore GDB state
+
     bt = backtrace_all()
 
-    print(json.dumps(bt))
+    if bt:
+        response = {"result": bt}
+    else:
+        response = {}
+
+    print(json.dumps(response))
 
 main()
