@@ -436,7 +436,7 @@ fn main() {
 
     if display_progress {
         pb.set_style(ProgressStyle::default_bar()
-                     .template("[+] Triaging {spinner:.green} [{pos}/{len} {elapsed_precise}] [{bar:.cyan/blue}] {msg}")
+                     .template("[+] Triaging {spinner:.green} [{pos}/{len} {elapsed_precise}] [{bar:.cyan/blue}] {wide_msg}")
                      .progress_chars("#>-"));
         pb.enable_steady_tick(200);
 
@@ -482,7 +482,7 @@ fn main() {
             TriageResult::NoCrash(child) => {
                 state.no_crash += 1;
 
-                write_message("No crash".into());
+                //write_message("No crash".into());
             }
             TriageResult::Crash(triage) => {
                 let report = report.as_ref().unwrap();
