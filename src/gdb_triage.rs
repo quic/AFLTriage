@@ -253,7 +253,7 @@ impl GdbTriager {
         let output = match process::execute_capture_output(&self.gdb, &gdb_args) {
             Ok(o) => o,
             Err(e) => {
-                println!("[X] Failed to execute '{}': {}", &self.gdb, e);
+                log::error!("Failed to execute '{}': {}", &self.gdb, e);
                 return false
             }
         };
@@ -271,12 +271,12 @@ impl GdbTriager {
         };
 
         if !output.status.success() || version == None || python_version == None {
-            println!("[X] GDB sanity check failure\nARGS:{}\nSTDOUT: {}\nSTDERR: {}",
+            log::error!("GDB sanity check failure\nARGS:{}\nSTDOUT: {}\nSTDERR: {}",
                      gdb_args.join(" "), decoded_stdout, decoded_stderr);
             return false
         }
 
-        println!("[+] GDB is working ({} - Python {})",
+        log::info!("GDB is working ({} - Python {})",
             version.unwrap(), python_version.unwrap());
 
         true

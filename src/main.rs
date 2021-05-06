@@ -191,7 +191,7 @@ fn determine_input_type(input: &PathBuf) -> UserInputPathType {
 fn sanity_check(gdb: &GdbTriager, binary_args: &Vec<&str>) -> bool {
     match binary_args.iter().find(|s| s.to_string() == "@@") {
         None => {
-            println!("[!] Image triage args missing file placeholder: @@");
+            log::warn!("Image triage args missing file placeholder: @@");
             return false
         }
         _ => ()
@@ -205,17 +205,15 @@ fn sanity_check(gdb: &GdbTriager, binary_args: &Vec<&str>) -> bool {
     if justfilename == rawexe.to_string() {
         match which::which(rawexe) {
             Err(_) => {
-                println!("[X] Binary {} not found in PATH. Try using the absolute path",
+                log::error!("Binary {} not found in PATH. Try using the absolute path",
                          rawexe);
                 return false
             }
             _ => ()
         }
-
-        println!("PATH based name");
     } else {
         if !exe.is_executable() {
-            println!("[X] Binary {} does not exist or is not executable", rawexe);
+            log::error!("Binary {} does not exist or is not executable", rawexe);
             return false;
         }
     }
@@ -228,12 +226,12 @@ fn sanity_check(gdb: &GdbTriager, binary_args: &Vec<&str>) -> bool {
 
     match env::var("ASAN_OPTIONS") {
         Ok(val) => {
-            println!("[!] Using ASAN_OPTIONS=\"{}\" that was set by the environment. This can change triage result accuracy", val);
+            log::warn!("Using ASAN_OPTIONS=\"{}\" that was set by the environment. This can change triage result accuracy", val);
 
             let re = Regex::new(r"abort_on_error=(1|true)").unwrap();
             match re.find(&val) {
                 None => {
-                    println!("[X] ASAN_OPTIONS does not have required abort_on_error=1 option");
+                    log::error!("ASAN_OPTIONS does not have required abort_on_error=1 option");
                     return false;
                 }
                 _ => ()
@@ -254,7 +252,7 @@ fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Tes
 
         match input.ty {
             UserInputPathType::Single => {
-                println!("[+] Triaging single {}", pathStr);
+                log::info!("Triaging single {}", pathStr);
                 all_testcases.push(Testcase {
                     unique_id: ids.from_path(&input.path.as_path()),
                     path: input.path.clone()
@@ -275,14 +273,14 @@ fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Tes
                         }
 
                         if valid > 0 {
-                            println!("[+] Triaging plain directory {} ({} files)",
+                            log::info!("Triaging plain directory {} ({} files)",
                                 pathStr, valid);
                         } else {
-                            println!("[!] No files found in directory {}",
+                            log::warn!("No files found in directory {}",
                                 pathStr);
                         }
                     }
-                    _ => println!("[!] Failed to get files from directory {}", pathStr)
+                    _ => log::warn!("Failed to get files from directory {}", pathStr)
                 }
             },
             UserInputPathType::AflDir => {
@@ -305,13 +303,13 @@ fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Tes
                         }
 
                         if valid > 0 {
-                            println!("[+] Triaging AFL directory {} ({} files)",
+                            log::info!("Triaging AFL directory {} ({} files)",
                                 pathStr, valid);
                         } else {
-                            println!("[!] No crashes found in AFL directory {}", pathStr);
+                            log::warn!("No crashes found in AFL directory {}", pathStr);
                         }
                     }
-                    Err(e) => println!("[!] Failed to get AFL crashes from directory {}: {}",
+                    Err(e) => log::warn!("Failed to get AFL crashes from directory {}: {}",
                                        pathStr, e)
                 }
 
@@ -319,26 +317,26 @@ fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Tes
                     Ok(s) => {
                         match afl::validate_afl_fuzzer_stats(s) {
                             Ok(s2) => {
-                                println!(" ├─ Banner: {}", s2.afl_banner);
-                                println!(" ├─ Command line: \"{}\"", s2.command_line);
-                                println!(" └─ Paths found: {}", s2.paths_total);
+                                log::info!("├─ Banner: {}", s2.afl_banner);
+                                log::info!("├─ Command line: \"{}\"", s2.command_line);
+                                log::info!("└─ Paths found: {}", s2.paths_total);
                                 Some(s2)
                             }
                             Err(e) => {
-                                println!("[!] Failed to validate AFL fuzzer_stats: {}", e);
+                                log::warn!("Failed to validate AFL fuzzer_stats: {}", e);
                                 None
                             }
                         }
                     }
                     Err(e) => {
-                        println!("[!] AFL directory is missing fuzzer_stats");
+                        log::warn!("AFL directory is missing fuzzer_stats");
                         None
                     }
                 };
 
                 input.fuzzer_stats = fuzzer_stats;
             },
-            _ => println!("[!] Skipping unknown or missing path {}", pathStr),
+            _ => log::warn!("Skipping unknown or missing path {}", pathStr),
         }
     }
 
@@ -346,7 +344,7 @@ fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Tes
 }
 
 fn init_logger() {
-    use env_logger::{fmt::Color, Builder, Env};
+    use env_logger::{fmt::Color, Builder, Env, Target};
     use log::{Level, LevelFilter};
     use std::io::Write;
 
@@ -354,6 +352,7 @@ fn init_logger() {
 
     Builder::from_env(env)
         .filter_level(LevelFilter::Info)
+        .target(Target::Stdout)
         .format(|buf, record| {
             let mut style = buf.style();
 
@@ -378,7 +377,7 @@ fn init_logger() {
                 buf,
                 "{} {}",
                 style.value(level_name),
-                record.args()
+                style.value(record.args())
             )
         })
     .init();
@@ -399,9 +398,8 @@ fn main() {
 
     let args = setup_command_line();
 
-    init_logger();
-
     println!("AFLTriage v{} by Grant Hernandez\n", VERSION);
+    init_logger();
 
     let binary_args: Vec<&str> = args.values_of("command").unwrap().collect();
 
@@ -414,7 +412,7 @@ fn main() {
 
     let binary_cmdline = binary_args.join(" ");
 
-    println!("[+] Image triage cmdline: \"{}\"", binary_cmdline);
+    log::info!("Image triage cmdline: \"{}\"", binary_cmdline);
 
     let output = args.value_of("output").unwrap();
 
@@ -426,7 +424,7 @@ fn main() {
                 Err(e) => match e.kind() {
                     std::io::ErrorKind::AlreadyExists => (),
                     _ => {
-                        println!("[X] Error creating output directory: {}", e);
+                        log::error!("Error creating output directory: {}", e);
                         return;
                     }
                 },
@@ -438,8 +436,8 @@ fn main() {
     };
 
     match &output_dir { 
-        Some(d) =>println!("[+] Reports will be output to directory \"{}\"", output),
-        None => println!("[+] Reports output to terminal"),
+        Some(d) =>log::info!("Reports will be output to directory \"{}\"", output),
+        None => log::info!("Reports output to terminal"),
     }
 
     let input_paths: Vec<&str> = args.values_of("input").unwrap().collect();
@@ -458,14 +456,16 @@ fn main() {
     let all_testcases = collect_input_testcases(&mut processed_inputs);
 
     if all_testcases.is_empty() {
-        println!("No testcases found!");
+        log::error!("No testcases found!");
         return
     }
 
     if args.is_present("dryrun") {
-        println!("Exiting due to dry run");
+        log::error!("Exiting due to dry run");
         return
     }
+
+    log::info!("Triaging {} testcases", all_testcases.len());
 
     let debug = args.is_present("debug");
     let child_output = args.is_present("child_output");
@@ -473,7 +473,7 @@ fn main() {
     let requested_job_count = value_t!(args, "jobs", usize).unwrap_or_else(|e| num_cpus::get() / 2); 
     let job_count = std::cmp::max(1, std::cmp::min(requested_job_count, all_testcases.len()));
 
-    println!("[+] Using {} threads to triage", job_count);
+    log::info!("Using {} threads to triage", job_count);
 
     rayon::ThreadPoolBuilder::new().num_threads(job_count).build_global().unwrap();
 
@@ -486,18 +486,16 @@ fn main() {
                      .template("[+] Triaging {spinner:.green} [{pos}/{len} {elapsed_precise}] [{bar:.cyan/blue}] {wide_msg}")
                      .progress_chars("#>-"));
         pb.enable_steady_tick(200);
-
-        pb.set_message(format!("Processing initial {} test cases", job_count).as_str());
-    } else {
-        println!("{}", format!("Processing initial {} test cases", job_count).as_str());
     }
 
     let write_message: Box<dyn Fn(String) + Sync> = match display_progress {
         true => Box::new(|msg| {
             pb.set_message(&msg)
         }),
-        false => Box::new(|msg| { println!("{}", msg) })
+        false => Box::new(|msg| { log::info!("{}", msg) })
     };
+
+    write_message(format!("Processing initial {} test cases", job_count).into());
 
     let state = Arc::new(Mutex::new(TriageState {
         crashed: 0,
@@ -597,16 +595,16 @@ fn main() {
     let state = state.lock().unwrap();
     let total = all_testcases.len();
 
-    println!("[+] Triage stats [Crashes: {} (unique {}), No crash: {}, Errored: {}]",
+    log::info!("Triage stats [Crashes: {} (unique {}), No crash: {}, Errored: {}]",
         state.crashed, state.crash_signature.len(), state.no_crash, state.errored);
 
     if state.errored == total {
         // TODO: handle timeout/memory limit different vs. internal errors
-        println!("[X] Something seems to be wrong during triage as all testcases errored.");
+        log::error!("Something seems to be wrong during triage as all testcases errored.");
     } 
 
     if state.errored > 0 {
-        println!("[!] There were {} error(s) ({} unique) during triage",
+        log::warn!("There were {} error(s) ({} unique) during triage",
             state.errored, state.unique_errors.len());
 
         for (err, times) in &state.unique_errors {
@@ -630,11 +628,11 @@ fn main() {
                 msg
             };
 
-            println!("[X] Triage error: {}", msg);
+            log::error!("Triage error: {}", msg);
         }
     }
 
     if state.no_crash == total {
-        println!("[!] None of the testcases crashed! Make sure that you are using the correct target command line and the right set of testcases");
+        log::warn!("None of the testcases crashed! Make sure that you are using the correct target command line and the right set of testcases");
     }
 }
