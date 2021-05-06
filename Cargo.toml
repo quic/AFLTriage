@@ -23,3 +23,5 @@ which = "4"
 is_executable = "1"
 num_enum = "0"
 num_cpus = "1.0"
+log = "0"
+env_logger = { version = "0", features = ["termcolor"] }

@@ -345,6 +345,45 @@ fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Tes
     all_testcases
 }
 
+fn init_logger() {
+    use env_logger::{fmt::Color, Builder, Env};
+    use log::{Level, LevelFilter};
+    use std::io::Write;
+
+    let env = Env::default();
+
+    Builder::from_env(env)
+        .filter_level(LevelFilter::Info)
+        .format(|buf, record| {
+            let mut style = buf.style();
+
+            let timestamp = buf.timestamp();
+
+            let level_name = match record.level() {
+                Level::Info => {
+                    "[+]".to_string()
+                }
+                Level::Warn => {
+                    style.set_color(Color::Yellow).set_intense(true);
+                    "[!]".to_string()
+                }
+                Level::Error => {
+                    style.set_color(Color::Red).set_intense(true);
+                    "[X]".to_string()
+                }
+                _ => format!("[{}]", record.level().to_string()),
+            };
+
+            writeln!(
+                buf,
+                "{} {}",
+                style.value(level_name),
+                record.args()
+            )
+        })
+    .init();
+}
+
 fn main() {
     /* AFLTriage Flow
      *
@@ -359,6 +398,8 @@ fn main() {
      */
 
     let args = setup_command_line();
+
+    init_logger();
 
     println!("AFLTriage v{} by Grant Hernandez\n", VERSION);
 
@@ -434,7 +475,6 @@ fn main() {
 
     println!("[+] Using {} threads to triage", job_count);
 
-    // TODO: -n flag for parallelism
     rayon::ThreadPoolBuilder::new().num_threads(job_count).build_global().unwrap();
 
     let pb = ProgressBar::new((&all_testcases).len() as u64);
