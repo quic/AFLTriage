@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 
 lazy_static! {
-    static ref ALLOWED_CHARS: Regex = Regex::new(r#"[^A-Za-z0-9_]"#).unwrap();
+    static ref ALLOWED_CHARS: Regex = Regex::new(r#"[^A-Za-z0-9_-]"#).unwrap();
 }
 
 pub struct UniqueIdFactory {

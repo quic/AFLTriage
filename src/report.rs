@@ -10,23 +10,74 @@ use std::cmp;
 
 lazy_static! {
     static ref R_CIDENT: Regex = Regex::new(r#"[_a-zA-Z][_a-zA-Z0-9]{0,30}"#).unwrap();
+    static ref R_ASAN_HEADLINE: Regex = Regex::new(
+        r#"(?x)
+        (?P<pid>=+[0-9]+=+)\s*ERROR:\s*AddressSanitizer:\s*
+        (attempting\s)?(?P<reason>[-_A-Za-z0-9]+)"#).unwrap();
+    static ref R_ASAN_FIRST_FRAME: Regex = Regex::new(
+        r#"#0\s+(?P<frame>0x[a-fA-F0-9]+)"#).unwrap();
 }
 
 pub struct CrashReport {
     pub headline: String,
+    pub terse_headline: String,
     pub crashing_function: String,
     pub backtrace: String,
     pub crash_context: String,
+    pub asan_body: String,
     pub register_info: String,
     pub stackhash: String
+}
+
+struct AsanInfo {
+    stop_reason: String,
+    first_frame: u64,
+    body: String,
+}
+
+fn asan_post_process(triage_result: &GdbTriageResult) -> Option<AsanInfo> {
+    let asan_match = R_ASAN_HEADLINE.captures(&triage_result.child.stderr);
+
+    if asan_match.is_none() {
+        return None
+    }
+
+    // cut out the ASAN body from the child's output
+    let asan_headline = asan_match.unwrap();
+    let asan_start_marker = asan_headline.name("pid").unwrap().as_str();
+
+    // find the bounds of the ASAN print to capture it raw
+    let asan_start_pos = asan_headline.get(0).unwrap().start();
+
+    let asan_body = match &triage_result.child.stderr[asan_start_pos+1..].find(asan_start_marker) {
+        Some(asan_end_pos) => &triage_result.child.stderr[asan_start_pos..(asan_start_pos+asan_end_pos+asan_start_marker.len()+1)],
+        None => "",
+    };
+
+    // Try and find the frame where ASAN was triggered from
+    // That way we can print a better info message
+    let asan_first_frame: u64 = match R_ASAN_FIRST_FRAME.captures(&asan_body) {
+        Some(frame) => {
+            u64::from_str_radix(&frame.name("frame").unwrap().as_str()[2..], 16).unwrap()
+        }
+        None => 0
+    };
+
+    Some(AsanInfo {
+        stop_reason: asan_headline.name("reason").unwrap().as_str().to_string(),
+        first_frame: asan_first_frame,
+        body: asan_body.to_string()
+    })
 }
 
 pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
     let mut report = CrashReport {
         headline: "".to_string(),
+        terse_headline: "".to_string(),
         crashing_function: "".to_string(),
         stackhash: "".to_string(),
         crash_context: "".to_string(),
+        asan_body: "".to_string(),
         register_info: "".to_string(),
         backtrace: "".to_string(),
     };
@@ -43,30 +94,69 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
 
     let first_frame = frames.get(0).unwrap();
 
-    report.crashing_function = match &first_frame.symbol {
+    let asan = asan_post_process(triage_result);
+
+    let first_interesting_frame = match &asan {
+        Some(asan) => {
+            let mut asan_frame = None;
+
+            // search the backtrace for a closely matching frame
+            // note that ASAN backtrace addresses and GDB addresses can be off-by-one, hence
+            // the ranged check
+            for (i, fr) in frames.iter().enumerate() {
+                if (fr.address+1) >= asan.first_frame && (fr.address-1) <= asan.first_frame {
+                    asan_frame = Some(fr);
+                    break
+                }
+            }
+
+            asan_frame.unwrap_or(first_frame)
+        }
+        _ => first_frame,
+    };
+
+    report.crashing_function = match &first_interesting_frame.symbol {
         Some(symbol) => format!("{}", symbol.format()),
         // TODO: align to word size, not 8
-        None => format!("0x{:<08x}", first_frame.address),
+        None => format!("0x{:<08x}", first_interesting_frame.address),
     };
 
     let stop_info = &ctx_info.stop_info;
-
-    //report.crash_context += &format!("{:?}\n", stop_info);
     let signal_info = format!("{} (si_signo={})", stop_info.signal, stop_info.signal_number);
     let signal_code_info = format!("{} (si_code={})",
+
     si_code_to_string(&stop_info.signal, stop_info.signal_code as i8), stop_info.signal_code);
 
-    let fault_address = match &stop_info.faulting_address {
-        Some(addr) => format!(" due to a fault at or near 0x{:<08x}", addr),
-        None => "".to_string()
-    };
+    match &asan {
+        Some(asan) => {
+            report.headline = format!("ASAN detected {} in {} causing {} / {}",
+                asan.stop_reason,
+                report.crashing_function,
+                signal_info,
+                signal_code_info,
+            );
+            report.terse_headline = format!("ASAN_{}_{}", asan.stop_reason, report.crashing_function);
+        }
+        None => {
+            let fault_address = match &stop_info.faulting_address {
+                Some(addr) => format!(" due to a fault at or near 0x{:<08x}", addr),
+                None => "".to_string()
+            };
 
-    report.headline = format!("Program received {} / {} in {}{}",
-        signal_info,
-        signal_code_info,
-        report.crashing_function,
-        fault_address
-    );
+            report.headline = format!("Program received {} / {} in {}{}",
+                signal_info,
+                signal_code_info,
+                report.crashing_function,
+                fault_address
+            );
+
+            report.terse_headline = format!("{}_{}", stop_info.signal, report.crashing_function);
+        }
+    }
+
+    if let Some(asan) = asan {
+        report.asan_body = asan.body;
+    }
 
     let mut major_hash = md5::Context::new();
     let mut backtrace = String::new();
@@ -83,19 +173,19 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
             for ident in R_CIDENT.find_iter(insn) {
                 for reg in registers {
                     if ident.as_str() == reg.name {
-                        report.crash_context += &format!("{} = {:<08x}\n", reg.name, reg.value);
+                        report.crash_context += &format!("{} = 0x{:<08x}\n", reg.name, reg.value);
                         break
                     }
                 }
             }
         }
 
-        report.crash_context += &format!("Execution stopped here ==> {:<08x}: {}\n", first_frame.address, insn);
+        report.crash_context += &format!("Execution stopped here ==> 0x{:<08x}: {}\n", first_frame.address, insn);
     }
 
     for (i, fr) in frames.iter().enumerate() {
         // TODO: align to word size, not 8
-        let frame_header = format!("#{:<2} {:<08x}", i, fr.address);
+        let frame_header = format!("#{:<2} 0x{:<08x}", i, fr.address);
         let frame_pad = frame_header.len() + 1;
 
         let file_sym = match &fr.symbol {

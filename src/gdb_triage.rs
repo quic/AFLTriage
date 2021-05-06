@@ -96,8 +96,8 @@ impl GdbVariable {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GdbFrameInfo {
-    pub address: i64,
-    pub relative_address: i64,
+    pub address: u64,
+    pub relative_address: u64,
     pub module: String,
     pub module_address: String,
     pub symbol: Option<GdbSymbol>,

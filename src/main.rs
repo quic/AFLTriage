@@ -191,7 +191,7 @@ fn determine_input_type(input: &PathBuf) -> UserInputPathType {
 fn sanity_check(gdb: &GdbTriager, binary_args: &Vec<&str>) -> bool {
     match binary_args.iter().find(|s| s.to_string() == "@@") {
         None => {
-            log::warn!("Image triage args missing file placeholder: @@");
+            log::error!("Image triage args missing file placeholder: @@");
             return false
         }
         _ => ()
@@ -547,19 +547,26 @@ fn main() {
                     text_report += &format!("Crash context:\n{}\n", report.crash_context);
                     text_report += &format!("Crashing thread backtrace:\n{}\n", report.backtrace);
 
+                    if !report.asan_body.is_empty() {
+                        text_report += &format!("ASAN Report:\n{}\n", report.asan_body);
+                    }
+
                     if child_output {
                         text_report += &format!("\nChild STDOUT:\n{}\n\nChild STDERR:\n{}\n",
                             triage.child.stdout, triage.child.stderr);
                     }
 
                     if output_dir.is_none() {
-                        write_message("--- REPORT BEGIN ---".to_string());
-                        write_message(text_report);
-                        write_message("--- REPORT END ---".to_string());
+                        write_message(
+                            format!(
+                                "--- REPORT BEGIN ---\n{}\n--- REPORT END ---",
+                                text_report,
+                            )
+                        );
                     } else {
                         let output_dir = output_dir.as_ref().unwrap();
                         let report_filename = format!("afltriage_{}_{}.txt",
-                            util::sanitize(&report.crashing_function), &report.stackhash[..8]);
+                            util::sanitize(&report.terse_headline), &report.stackhash[..8]);
 
                         match std::fs::write(output_dir.join(report_filename), text_report) {
                             Err(e) => {
@@ -590,7 +597,11 @@ fn main() {
         }
     });
 
-    pb.finish_and_clear();
+    if display_progress {
+        pb.finish();
+    } else {
+        pb.finish_and_clear();
+    }
 
     let state = state.lock().unwrap();
     let total = all_testcases.len();
