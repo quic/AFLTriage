@@ -13,7 +13,10 @@ lazy_static! {
     static ref R_ASAN_HEADLINE: Regex = Regex::new(
         r#"(?x)
         (?P<pid>=+[0-9]+=+)\s*ERROR:\s*AddressSanitizer:\s*
-        (attempting\s)?(?P<reason>[-_A-Za-z0-9]+)"#).unwrap();
+        (attempting\s)?(?P<reason>[-_A-Za-z0-9]+)[^\r\n]+[\r\n]+
+        (?P<operation>[-_A-Za-z0-9]+)?
+        "#).unwrap();
+
     static ref R_ASAN_FIRST_FRAME: Regex = Regex::new(
         r#"#0\s+(?P<frame>0x[a-fA-F0-9]+)"#).unwrap();
 }
@@ -31,6 +34,7 @@ pub struct CrashReport {
 
 struct AsanInfo {
     stop_reason: String,
+    operation: String,
     first_frame: u64,
     body: String,
 }
@@ -54,6 +58,8 @@ fn asan_post_process(triage_result: &GdbTriageResult) -> Option<AsanInfo> {
         None => "",
     };
 
+    let stop_reason = asan_headline.name("reason").unwrap().as_str().to_string();
+
     // Try and find the frame where ASAN was triggered from
     // That way we can print a better info message
     let asan_first_frame: u64 = match R_ASAN_FIRST_FRAME.captures(&asan_body) {
@@ -63,8 +69,20 @@ fn asan_post_process(triage_result: &GdbTriageResult) -> Option<AsanInfo> {
         None => 0
     };
 
+    let operation: &str = match asan_headline.name("operation") {
+        Some(op) => {
+            if stop_reason != "SEGV" {
+                op.as_str()
+            } else {
+                ""
+            }
+        }
+        _ => "",
+    };
+
     Some(AsanInfo {
-        stop_reason: asan_headline.name("reason").unwrap().as_str().to_string(),
+        stop_reason,
+        operation: operation.to_string(),
         first_frame: asan_first_frame,
         body: asan_body.to_string()
     })
@@ -129,13 +147,26 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
 
     match &asan {
         Some(asan) => {
-            report.headline = format!("ASAN detected {} in {} causing {} / {}",
+            let op = if asan.operation.is_empty() {
+                report.terse_headline = format!("ASAN_{}_{}",
+                    asan.stop_reason, report.crashing_function);
+
+                "".to_string()
+            } else {
+                report.terse_headline = format!("ASAN_{}_{}_{}",
+                    asan.stop_reason, asan.operation, report.crashing_function);
+
+                format!(" after a {}", asan.operation)
+            };
+
+            report.headline = format!("ASAN detected {} in {}{} leading to {} / {}",
                 asan.stop_reason,
                 report.crashing_function,
+                op,
                 signal_info,
                 signal_code_info,
             );
-            report.terse_headline = format!("ASAN_{}_{}", asan.stop_reason, report.crashing_function);
+
         }
         None => {
             let fault_address = match &stop_info.faulting_address {
