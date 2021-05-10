@@ -193,21 +193,42 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
     let mut backtrace = String::new();
 
     if let Some(registers) = &primary_thread.registers {
+        let mut regpad = 0;
         for reg in registers {
-            report.register_info += &format!("{} - 0x{:<08x} ({})\n", reg.name, reg.value, reg.pretty_value);
+            regpad = std::cmp::max(regpad, reg.name.len());
+        }
+
+        for reg in registers {
+            let regvpad = reg.size*2;
+            report.register_info += &format!("{:>regpad$} - 0x{:0>regvpad$x} ({})\n",
+                reg.name, reg.value, reg.pretty_value, regpad=regpad, regvpad=regvpad as usize);
         }
     }
 
     if let Some(insn) = &primary_thread.current_instruction {
 
         if let Some(registers) = &primary_thread.registers {
+            let mut regs_seen = HashSet::new();
+
             for ident in R_CIDENT.find_iter(insn) {
                 for reg in registers {
                     if ident.as_str() == reg.name {
-                        report.crash_context += &format!("{} = 0x{:<08x}\n", reg.name, reg.value);
+                        regs_seen.insert(reg);
+                        //report.crash_context += &format!("{} = 0x{:<08x}\n", reg.name, reg.value);
                         break
                     }
                 }
+            }
+
+            let mut regpad = 0;
+            for reg in &regs_seen {
+                regpad = std::cmp::max(regpad, reg.name.len());
+            }
+
+            for reg in &regs_seen {
+                let regvpad = reg.size*2;
+                report.crash_context += &format!("/* Register reference: {:>regpad$} - 0x{:0>regvpad$x} ({}) */\n",
+                    reg.name, reg.value, reg.pretty_value, regpad=regpad, regvpad=regvpad as usize);
             }
         }
 

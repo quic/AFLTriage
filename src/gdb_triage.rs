@@ -111,13 +111,14 @@ pub struct GdbThread {
     pub registers: Option<Vec<GdbRegister>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GdbRegister {
     pub name: String,
     pub value: u64,
     pub pretty_value: String,
     pub r#type: String,
-    pub size: u32,
+    /// Size in bytes
+    pub size: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
