@@ -383,12 +383,12 @@ def capture_backtrace(primary=True, detailed=False):
 def get_instruction_at(pc):
     try:
         insn = gdb.execute("x/1i 0x%x" % (pc), to_string=True).splitlines()[0]
-        delim = insn.rfind(":")
+        match = re.match("^(=> )?0x[0-9a-fA-F]+( <.*>)?:\s(.*)$", insn)
 
-        if delim == -1:
+        if not match:
             return None
 
-        insn = insn[delim+1:]
+        insn = match.group(3)
 
         return insn.strip()
     except gdb.error:
