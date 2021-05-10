@@ -283,8 +283,6 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
                                         "", symbol.format_function_prototype(), pad=pad)),
                         }
 
-                        let code = callsite.get(0).unwrap();
-
                         match &symbol.locals {
                             Some(locals) => {
                                 let mut locals_left = HashSet::new();
@@ -317,12 +315,24 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
                             _ => ()
                         }
 
-                        ctx.push(format!("{:|<pad$}:", "", pad=pad));
-                        for (i, code) in callsite.iter().enumerate() {
-                            // context always comes before the line
-                            ctx.push(format!("{:>pad$}: {}",
-                                    (symbol.line.unwrap() as usize)-callsite.len()+i+1, code, pad=pad));
+                        // see if first line of crash context is less than or equal to function start
+                        let first_line = (symbol.line.unwrap() as usize)-callsite.len()+1;
+
+                        if first_line > ((symbol.function_line.unwrap_or(0)+1) as usize) {
+                            ctx.push(format!("{:|<pad$}:", "", pad=pad));
                         }
+
+                        for (i, code) in callsite.iter().enumerate() {
+                            let lineno = (symbol.line.unwrap() as usize)-callsite.len()+i+1;
+
+                            if lineno <= (symbol.function_line.unwrap_or(0) as usize) {
+                                continue
+                            }
+
+                            // context always comes before the line
+                            ctx.push(format!("{:>pad$}: {}", lineno, code, pad=pad));
+                        }
+
                         ctx.push(format!("{:|<pad$}:", "", pad=pad));
                         ctx.push(format!("{:-<pad$}: }}", "", pad=pad));
                     }
