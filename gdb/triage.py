@@ -30,8 +30,10 @@ r_FILE_INFO = re.compile(r"(0x[a-fA-F0-9]+) - (0x[a-fA-F0-9]+) is ([^\s]+)( in .
 r_REGISTER_LIST = re.compile(r"([^\s]+)\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)\s+([^\s]+)\s+([^\s]+)")
 r_REGISTER_VALUES = re.compile(r"([^\s]+)\s+(0x[a-fA-F0-9]+)\s+(.*)")
 
+#### OPTIONS
 # Collect backtraces from all threads
-all_threads = False
+ALL_THREADS = False
+FRAME_LIMIT=100
 
 """
 ######################
@@ -236,11 +238,16 @@ def get_code_context(location, filename):
 
     return lineno, code
 
-def capture_backtrace(primary=True, detailed=False):
+def capture_backtrace(primary=True, detailed=False, frame_limit=0):
     backtrace = []
     cframe = gdb.newest_frame()
+    frame_count = 0
 
     while cframe and cframe.is_valid():
+        frame_count += 1
+        if frame_limit and frame_count > frame_limit:
+            break
+
         frame_info = {}
         decorator = gdb.FrameDecorator.FrameDecorator(cframe)
 
@@ -443,7 +450,7 @@ def backtrace_all():
 
     pri_thread_info = {}
     pri_thread_info["tid"] = xint(primary_thread.num)
-    pri_thread_info["backtrace"] = capture_backtrace(primary=True, detailed=True)
+    pri_thread_info["backtrace"] = capture_backtrace(primary=True, detailed=True, frame_limit=FRAME_LIMIT)
 
     regs = get_primary_register_values()
     if regs:
@@ -459,7 +466,7 @@ def backtrace_all():
     gdb_state["primary_thread"] = pri_thread_info
 
     # having extra thread information is optional
-    if all_threads:
+    if ALL_THREADS:
         infe = gdb.selected_inferior()
 
         threads = []
@@ -471,7 +478,7 @@ def backtrace_all():
 
             thread_info = {}
             thread_info["tid"] = xint(thread.num)
-            thread_info["backtrace"] = capture_backtrace(primary=False, detailed=False)
+            thread_info["backtrace"] = capture_backtrace(primary=False, detailed=False, frame_limit=FRAME_LIMIT)
 
             threads += [thread_info]
 
