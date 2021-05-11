@@ -571,8 +571,13 @@ fn main() {
                     }
 
                     if child_output {
+                        let stderr = match report.asan_body.is_empty() {
+                            false => triage.child.stderr.replace(&report.asan_body, "<ASAN Report>"),
+                            true => triage.child.stderr,
+                        };
+
                         text_report += &format!("\nChild STDOUT:\n{}\n\nChild STDERR:\n{}\n",
-                            triage.child.stdout, triage.child.stderr);
+                            triage.child.stdout, stderr);
                     }
 
                     if output_dir.is_none() {

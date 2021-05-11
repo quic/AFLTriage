@@ -12,6 +12,7 @@ lazy_static! {
     static ref R_CIDENT: Regex = Regex::new(r#"[_a-zA-Z][_a-zA-Z0-9]{0,30}"#).unwrap();
     static ref R_ASAN_HEADLINE: Regex = Regex::new(
         r#"(?x)
+        ([=]+[\r\n]+)?
         (?P<pid>=+[0-9]+=+)\s*ERROR:\s*AddressSanitizer:\s*
         (attempting\s)?(?P<reason>[-_A-Za-z0-9]+)[^\r\n]+[\r\n]+
         (?P<operation>[-_A-Za-z0-9]+)?
@@ -51,10 +52,14 @@ fn asan_post_process(triage_result: &GdbTriageResult) -> Option<AsanInfo> {
     let asan_start_marker = asan_headline.name("pid").unwrap().as_str();
 
     // find the bounds of the ASAN print to capture it raw
-    let asan_start_pos = asan_headline.get(0).unwrap().start();
+    let asan_raw_headline = asan_headline.get(0).unwrap();
+    let asan_start_pos = asan_raw_headline.start();
 
-    let asan_body = match &triage_result.child.stderr[asan_start_pos+1..].find(asan_start_marker) {
-        Some(asan_end_pos) => &triage_result.child.stderr[asan_start_pos..(asan_start_pos+asan_end_pos+asan_start_marker.len()+1)],
+    let asan_body = match &triage_result.child.stderr[asan_raw_headline.end()..].find(asan_start_marker) {
+        Some(asan_end_pos) => {
+            let end_pos = asan_start_pos+asan_end_pos+asan_start_marker.len()+asan_raw_headline.as_str().len();
+            &triage_result.child.stderr[asan_start_pos..end_pos]
+        }
         None => "",
     };
 
