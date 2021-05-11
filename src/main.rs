@@ -222,7 +222,9 @@ fn sanity_check(gdb: &GdbTriager, binary_args: &Vec<&str>) -> bool {
         return false
     }
 
-    // TODO: ASAN_SYMBOLIZER_PATH=`which addr2line`
+    // Undocumented Glibc env var that prevents it from printing to /dev/tty, which isn't captured by GDB
+    // https://stackoverflow.com/questions/32056387/catching-libc-error-messages-redirecting-from-dev-tty
+    env::set_var("LIBC_FATAL_STDERR_", "1");
 
     match env::var("ASAN_OPTIONS") {
         Ok(val) => {
@@ -238,6 +240,23 @@ fn sanity_check(gdb: &GdbTriager, binary_args: &Vec<&str>) -> bool {
             }
         }
         Err(_) => env::set_var("ASAN_OPTIONS", "abort_on_error=1:allow_user_segv_handler=0:symbolize=1,detect_leaks=0")
+    }
+
+    match env::var("ASAN_SYMBOLIZER_PATH") {
+        Ok(val) => {
+            log::info!("Using ASAN_SYMBOLIZER_PATH=\"{}\" that was set by the environment", val);
+        }
+        Err(_) => {
+            match which::which("addr2line") {
+                Ok(path) => {
+                    env::set_var("ASAN_SYMBOLIZER_PATH", path.to_str().unwrap());
+                    log::info!("Using ASAN_SYMBOLIZER_PATH=\"{}\"", path.to_str().unwrap());
+                }
+                _ => {
+                    log::warn!("No ASAN_SYMBOLIZER_PATH found. Consider setting it to llvm-symbolizer or addr2line if your target is using ASAN");
+                }
+            }
+        }
     }
 
     true
