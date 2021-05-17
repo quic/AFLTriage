@@ -290,7 +290,8 @@ impl GdbTriager {
         };
 
         let gdb_run_command = match input_file {
-            Some(file) => format!("run < \"{}\"", file),
+            // GDB overwrites args in the format (damn you)
+            Some(file) => format!("run {} < \"{}\"", &prog_args[1..].join(" "), file),
             None => format!("run"),
         };
 
@@ -314,7 +315,10 @@ impl GdbTriager {
                             "-ex", format!("python [x.write('{}\\n') for x in [sys.stdout, sys.stderr]]", &MARKER_BACKTRACE.end),
                             "--args");
 
-        let output = match process::execute_capture_output(&self.gdb, &[&gdb_args[..], &prog_args[..]].concat()) {
+        let gdb_cmdline = &[&gdb_args[..], &prog_args[..]].concat();
+        let gdb_cmd_fmt = [std::slice::from_ref(&self.gdb), gdb_cmdline].concat().join(" ");
+
+        let output = match process::execute_capture_output(&self.gdb, gdb_cmdline) {
             Ok(o) => o,
             Err(e) => return Err(GdbTriageError::new("Failed to execute GDB command", e.to_string())),
         };
@@ -323,8 +327,8 @@ impl GdbTriager {
         let decoded_stderr = &output.stderr;
 
         if show_raw_output {
-            println!("--- RAW GDB BEGIN ---\nGDB ARGS: {}\nPROGRAM ARGS: {}\nSTDOUT:\n{}\nSTDERR:\n{}\n--- RAW GDB END ---",
-                gdb_args[..].join(" "), prog_args[..].join(" "), decoded_stdout, decoded_stderr);
+            println!("--- RAW GDB BEGIN ---\nPROGRAM CMDLINE: {}\nGDB CMDLINE: {}\nSTDOUT:\n{}\nSTDERR:\n{}\n--- RAW GDB END ---",
+                prog_args[..].join(" "), gdb_cmd_fmt, decoded_stdout, decoded_stderr);
         }
 
         let child_output_stdout = match extract_marker(decoded_stdout, &MARKER_CHILD_OUTPUT) {

@@ -307,7 +307,9 @@ def capture_backtrace(primary=True, detailed=False, frame_limit=0):
             # technically the inline function doesn't exist. only debugging
             # information indicates that it is there
             if cframe.type() != gdb.INLINE_FRAME:
-                sym["function_line"] = xint(fsym.line)
+                f_line = xint(fsym.line)
+                if f_line > 0:
+                    sym["function_line"] = f_line
 
         sym["file"] = xstr(decorator.filename())
 
