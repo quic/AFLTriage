@@ -1,7 +1,7 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
-use clap::{arg_enum, Arg, ArgMatches, App, AppSettings, crate_version};
+use clap::{arg_enum, Arg, ArgMatches, App, AppSettings};
 use std::path::PathBuf;
 use is_executable::IsExecutable;
 use std::collections::{HashSet, HashMap};
@@ -53,7 +53,8 @@ fn isatty() -> bool {
 fn setup_command_line() -> ArgMatches<'static> {
     let app = App::new("afltriage")
                           .version(crate_version!())
-                          .about("Quickly triage and summarize crashing testcases")
+                          .author(crate_authors!("\n"))
+                          .about(crate_description!())
                           .usage("afltriage -i <input>... -o <output> <command>...")
                           .setting(AppSettings::TrailingVarArg)
                           .setting(AppSettings::DontDelimitTrailingValues)
