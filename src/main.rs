@@ -435,6 +435,13 @@ fn main() {
 
     if input_stdin {
         log::info!("Providing testcase input via stdin");
+
+        match binary_args.iter().find(|s| s.to_string() == "@@") {
+            Some(_) => {
+                log::warn!("Image triage args contains @@ but you are using --stdin");
+            }
+            _ => ()
+        }
     } else {
         match binary_args.iter().find(|s| s.to_string() == "@@") {
             None => {
