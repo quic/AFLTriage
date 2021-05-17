@@ -77,6 +77,12 @@ fn setup_command_line() -> ArgMatches<'static> {
                                .short("-j")
                                .takes_value(true)
                                .help("How many threads to use during triage."))
+                          .arg(Arg::with_name("timeout")
+                               .short("-t")
+                               .long("--timeout")
+                               .default_value("60000")
+                               .takes_value(true)
+                               .help("The timeout in milliseconds for each testcase to triage."))
                           .arg(Arg::with_name("debug")
                                .long("--debug")
                                .help("Enable low-level debugging of triage operations."))
@@ -112,6 +118,7 @@ struct TestcaseResult<'a> {
 struct TriageState {
     crashed: usize,
     no_crash: usize,
+    timedout: usize,
     errored: usize,
     crash_signature: HashSet<String>,
     unique_errors: HashMap<GdbTriageError, usize>,
@@ -120,10 +127,18 @@ struct TriageState {
 enum TriageResult {
     NoCrash(ChildResult),
     Crash(GdbTriageResult),
-    Error(GdbTriageError)
+    Error(GdbTriageError),
+    Timedout,
 }
 
-fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str, debug: bool, input_stdin: bool) -> TriageResult {
+fn process_test_case(
+    gdb: &GdbTriager,
+    binary_args: &Vec<&str>,
+    testcase: &str,
+    debug: bool,
+    input_stdin: bool,
+    timeout_ms: u64) -> TriageResult {
+
     let mut prog_args: Vec<String> = Vec::new();
 
     for arg in binary_args.iter() {
@@ -140,10 +155,14 @@ fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str, 
         false => None,
     };
 
-    let triage_result: GdbTriageResult = match gdb.triage_program(prog_args, input_file, debug) {
+    let triage_result: GdbTriageResult = match gdb.triage_program(prog_args, input_file, debug, timeout_ms) {
         Ok(triage_result) => triage_result,
         Err(e) => {
-            return TriageResult::Error(e);
+            if e.error_kind == gdb_triage::GdbTriageErrorKind::ErrorTimeout {
+                return TriageResult::Timedout;
+            } else {
+                return TriageResult::Error(e);
+            }
         },
     };
 
@@ -512,6 +531,14 @@ fn main() {
     let debug = args.is_present("debug");
     let child_output = args.is_present("child_output");
 
+    let timeout_ms = value_t!(args, "timeout", u64).unwrap_or_else(|_| 60000);
+
+    if timeout_ms < 1000 {
+        log::warn!("Requested timeout of {}ms is dangerously low!", timeout_ms);
+    } else {
+        log::info!("Triage timeout set to {}ms", timeout_ms);
+    }
+
     let requested_job_count = value_t!(args, "jobs", usize).unwrap_or_else(|e| num_cpus::get() / 2); 
     let job_count = std::cmp::max(1, std::cmp::min(requested_job_count, all_testcases.len()));
 
@@ -543,13 +570,14 @@ fn main() {
         crashed: 0,
         no_crash: 0,
         errored: 0,
+        timedout: 0,
         crash_signature: HashSet::new(),
         unique_errors: HashMap::new(),
     }));
 
     all_testcases.par_iter().for_each(|testcase| {
         let path = testcase.path.to_str().unwrap();
-        let result = process_test_case(&gdb, &binary_args, path, debug, input_stdin);
+        let result = process_test_case(&gdb, &binary_args, path, debug, input_stdin, timeout_ms);
 
         let report = match &result {
             TriageResult::Crash(triage) => Some(report::format_text_report(&triage)),
@@ -568,6 +596,11 @@ fn main() {
         match result {
             TriageResult::NoCrash(child) => {
                 state.no_crash += 1;
+
+                //write_message("No crash".into());
+            }
+            TriageResult::Timedout => {
+                state.timedout += 1;
 
                 //write_message("No crash".into());
             }
@@ -653,8 +686,8 @@ fn main() {
     let state = state.lock().unwrap();
     let total = all_testcases.len();
 
-    log::info!("Triage stats [Crashes: {} (unique {}), No crash: {}, Errored: {}]",
-        state.crashed, state.crash_signature.len(), state.no_crash, state.errored);
+    log::info!("Triage stats [Crashes: {} (unique {}), No crash: {}, Timeout: {}, Errored: {}]",
+        state.crashed, state.crash_signature.len(), state.no_crash, state.timedout, state.errored);
 
     if state.errored == total {
         // TODO: handle timeout/memory limit different vs. internal errors
@@ -692,5 +725,9 @@ fn main() {
 
     if state.no_crash == total {
         log::warn!("None of the testcases crashed! Make sure that you are using the correct target command line and the right set of testcases");
+    }
+
+    if state.timedout == total {
+        log::warn!("All of the testcases timed out! Try increasing the timeout (GDB symbol loading can increase triage time) and double check you are using the right command line.");
     }
 }

@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tempfile;
-use std::io::Write;
+use std::io::{Error, ErrorKind, Write};
 
 use crate::process::{self, ChildResult};
 
@@ -149,28 +149,39 @@ pub struct GdbTriageResult {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
+pub enum GdbTriageErrorKind {
+    ErrorCommand,
+    ErrorInternal,
+    ErrorTimeout,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct GdbTriageError {
+    pub error_kind: GdbTriageErrorKind,
     pub error: String,
     pub details: Vec<String>,
 }
 
 impl GdbTriageError {
-    pub fn new(error: &str, extra_detail: String) -> GdbTriageError {
+    pub fn new(error_kind: GdbTriageErrorKind, error: &str, extra_detail: String) -> GdbTriageError {
         GdbTriageError {
+            error_kind,
             error: error.to_string(),
             details: vec![extra_detail]
         }
     }
 
-    pub fn new_brief(error: &str) -> GdbTriageError {
+    pub fn new_brief(error_kind: GdbTriageErrorKind, error: &str) -> GdbTriageError {
         GdbTriageError {
+            error_kind,
             error: error.to_string(),
             details: Vec::new(),
         }
     }
 
-    pub fn new_detailed(error: &str, details: Vec<String>) -> GdbTriageError {
+    pub fn new_detailed(error_kind: GdbTriageErrorKind, error: &str, details: Vec<String>) -> GdbTriageError {
         GdbTriageError {
+            error_kind,
             error: error.to_string(),
             details,
         }
@@ -283,10 +294,10 @@ impl GdbTriager {
         true
     }
 
-    pub fn triage_program(&self, prog_args: Vec<String>, input_file: Option<&str>, show_raw_output: bool) -> Result<GdbTriageResult, GdbTriageError> {
+    pub fn triage_program(&self, prog_args: Vec<String>, input_file: Option<&str>, show_raw_output: bool, timeout_ms: u64) -> Result<GdbTriageResult, GdbTriageError> {
         let triage_script_path = match &self.triage_script  {
             GdbTriageScript::Internal(tf) => tf.path(),
-            _ => return Err(GdbTriageError::new_brief("Unsupported triage script path")),
+            _ => return Err(GdbTriageError::new_brief(GdbTriageErrorKind::ErrorInternal, "Unsupported triage script path")),
         };
 
         let gdb_run_command = match input_file {
@@ -318,9 +329,15 @@ impl GdbTriager {
         let gdb_cmdline = &[&gdb_args[..], &prog_args[..]].concat();
         let gdb_cmd_fmt = [std::slice::from_ref(&self.gdb), gdb_cmdline].concat().join(" ");
 
-        let output = match process::execute_capture_output(&self.gdb, gdb_cmdline) {
+        let output = match process::execute_capture_output_timeout(&self.gdb, gdb_cmdline, timeout_ms) {
             Ok(o) => o,
-            Err(e) => return Err(GdbTriageError::new("Failed to execute GDB command", e.to_string())),
+            Err(e) => {
+                return if e.kind() == ErrorKind::TimedOut {
+                    Err(GdbTriageError::new(GdbTriageErrorKind::ErrorTimeout, "Timed out when triaging", e.to_string()))
+                } else {
+                    Err(GdbTriageError::new(GdbTriageErrorKind::ErrorCommand, "Failed to execute GDB command", e.to_string()))
+                };
+            }
         };
 
         let decoded_stdout = &output.stdout;
@@ -333,27 +350,27 @@ impl GdbTriager {
 
         let child_output_stdout = match extract_marker(decoded_stdout, &MARKER_CHILD_OUTPUT) {
             Ok(output) => output.to_string(),
-            Err(e) => return Err(GdbTriageError::new("Could not extract child STDOUT", e.to_string())),
+            Err(e) => return Err(GdbTriageError::new(GdbTriageErrorKind::ErrorCommand, "Could not extract child STDOUT", e.to_string())),
         };
 
         let child_output_stderr = match extract_marker(decoded_stderr, &MARKER_CHILD_OUTPUT) {
             Ok(output) => output.to_string(),
-            Err(e) => return Err(GdbTriageError::new("Could not extract child STDERR", e.to_string())),
+            Err(e) => return Err(GdbTriageError::new(GdbTriageErrorKind::ErrorCommand, "Could not extract child STDERR", e.to_string())),
         };
 
         let backtrace_output = match extract_marker(decoded_stdout, &MARKER_BACKTRACE) {
             Ok(output) => output,
-            Err(e) => return Err(GdbTriageError::new("Failed to get triage JSON from GDB", e.to_string())),
+            Err(e) => return Err(GdbTriageError::new(GdbTriageErrorKind::ErrorCommand, "Failed to get triage JSON from GDB", e.to_string())),
         };
 
         let backtrace_messages = match extract_marker(decoded_stderr, &MARKER_BACKTRACE) {
             Ok(output) => output,
-            Err(e) => return Err(GdbTriageError::new("Failed to get triage errors from GDB", e.to_string())),
+            Err(e) => return Err(GdbTriageError::new(GdbTriageErrorKind::ErrorCommand, "Failed to get triage errors from GDB", e.to_string())),
         };
 
         if backtrace_output.is_empty() {
             if !backtrace_messages.is_empty() {
-                return Err(GdbTriageError::new_detailed("Triage script emitted errors", backtrace_messages.lines().map(str::to_string).collect()))
+                return Err(GdbTriageError::new_detailed(GdbTriageErrorKind::ErrorCommand, "Triage script emitted errors", backtrace_messages.lines().map(str::to_string).collect()))
             }
         }
 
@@ -366,7 +383,7 @@ impl GdbTriager {
                     status: output.status,
                 },
             }),
-            Err(e) => return Err(GdbTriageError::new("Failed to parse triage JSON from GDB", e.to_string())),
+            Err(e) => return Err(GdbTriageError::new(GdbTriageErrorKind::ErrorCommand, "Failed to parse triage JSON from GDB", e.to_string())),
         };
     }
 
