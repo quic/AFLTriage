@@ -91,10 +91,14 @@ fn setup_command_line() -> ArgMatches<'static> {
                                .required(false)
                                .case_insensitive(true)
                                .help("The triage report output format."))
+                          .arg(Arg::with_name("stdin")
+                               .long("--stdin")
+                               .takes_value(false)
+                               .help("Provide testcase input to the target via stdin instead of a file."))
                           .arg(Arg::with_name("command")
                                .multiple(true)
                                .required(true)
-                               .help("The binary executable and args to execute. Use '@@' as a placeholder for the path to the input file."));
+                               .help("The binary executable and args to execute. Use '@@' as a placeholder for the path to the input file or --stdin."));
 
     return app.get_matches();
 }
@@ -119,7 +123,7 @@ enum TriageResult {
     Error(GdbTriageError)
 }
 
-fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str, debug: bool) -> TriageResult {
+fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str, debug: bool, input_stdin: bool) -> TriageResult {
     let mut prog_args: Vec<String> = Vec::new();
 
     for arg in binary_args.iter() {
@@ -130,7 +134,13 @@ fn process_test_case(gdb: &GdbTriager, binary_args: &Vec<&str>, testcase: &str, 
         }
     }
 
-    let triage_result: GdbTriageResult = match gdb.triage_testcase(prog_args, debug) {
+    // Whether to pass a file in via GDB stdin
+    let input_file = match input_stdin {
+        true => Some(testcase),
+        false => None,
+    };
+
+    let triage_result: GdbTriageResult = match gdb.triage_program(prog_args, input_file, debug) {
         Ok(triage_result) => triage_result,
         Err(e) => {
             return TriageResult::Error(e);
@@ -189,14 +199,6 @@ fn determine_input_type(input: &PathBuf) -> UserInputPathType {
 }
 
 fn sanity_check(gdb: &GdbTriager, binary_args: &Vec<&str>) -> bool {
-    match binary_args.iter().find(|s| s.to_string() == "@@") {
-        None => {
-            log::error!("Image triage args missing file placeholder: @@");
-            return false
-        }
-        _ => ()
-    }
-
     let rawexe = binary_args.get(0).unwrap();
     let exe = PathBuf::from(rawexe);
     let justfilename = exe.file_name().unwrap_or_else(|| std::ffi::OsStr::new("")).to_str().unwrap();
@@ -429,6 +431,20 @@ fn main() {
         return
     }
 
+    let input_stdin = args.is_present("stdin");
+
+    if input_stdin {
+        log::info!("Providing testcase input via stdin");
+    } else {
+        match binary_args.iter().find(|s| s.to_string() == "@@") {
+            None => {
+                log::error!("Image triage args missing file placeholder: @@. If you'd like to pass input to the child via stdin, use the --stdin option.");
+                return
+            }
+            _ => ()
+        }
+    }
+
     let binary_cmdline = binary_args.join(" ");
 
     log::info!("Image triage cmdline: \"{}\"", binary_cmdline);
@@ -526,7 +542,7 @@ fn main() {
 
     all_testcases.par_iter().for_each(|testcase| {
         let path = testcase.path.to_str().unwrap();
-        let result = process_test_case(&gdb, &binary_args, path, debug);
+        let result = process_test_case(&gdb, &binary_args, path, debug, input_stdin);
 
         let report = match &result {
             TriageResult::Crash(triage) => Some(report::format_text_report(&triage)),

@@ -283,10 +283,15 @@ impl GdbTriager {
         true
     }
 
-    pub fn triage_testcase(&self, prog_args: Vec<String>, show_raw_output: bool) -> Result<GdbTriageResult, GdbTriageError> {
+    pub fn triage_program(&self, prog_args: Vec<String>, input_file: Option<&str>, show_raw_output: bool) -> Result<GdbTriageResult, GdbTriageError> {
         let triage_script_path = match &self.triage_script  {
             GdbTriageScript::Internal(tf) => tf.path(),
             _ => return Err(GdbTriageError::new_brief("Unsupported triage script path")),
+        };
+
+        let gdb_run_command = match input_file {
+            Some(file) => format!("run < \"{}\"", file),
+            None => format!("run"),
         };
 
         // TODO: timeout
@@ -300,7 +305,7 @@ impl GdbTriager {
                             "-ex", "set logging file /dev/null",
                             "-ex", "set logging redirect on",
                             "-ex", "set logging on",
-                            "-ex", "run",
+                            "-ex", gdb_run_command,
                             "-ex", "set logging redirect off",
                             "-ex", "set logging off",
                             "-ex", format!("python [x.write('{}\\n') for x in [sys.stdout, sys.stderr]]", &MARKER_CHILD_OUTPUT.end),
