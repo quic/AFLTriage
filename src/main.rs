@@ -51,7 +51,7 @@ fn isatty() -> bool {
 }
 
 fn setup_command_line() -> ArgMatches<'static> {
-    let app = App::new("afltriage")
+    let mut app = App::new("afltriage")
                           .version(crate_version!())
                           .author(crate_authors!("\n"))
                           .about(crate_description!())
@@ -59,6 +59,7 @@ fn setup_command_line() -> ArgMatches<'static> {
                           .setting(AppSettings::TrailingVarArg)
                           .setting(AppSettings::DontDelimitTrailingValues)
                           .setting(AppSettings::DontCollapseArgsInUsage)
+                          .setting(AppSettings::UnifiedHelpMessage)
                           .arg(Arg::with_name("input")
                                .short("-i")
                                .takes_value(true)
@@ -106,6 +107,11 @@ fn setup_command_line() -> ArgMatches<'static> {
                                .multiple(true)
                                .required(true)
                                .help("The binary executable and args to execute. Use '@@' as a placeholder for the path to the input file or --stdin."));
+
+    if env::args().len() <= 1 {
+        app.print_help();
+        std::process::exit(0);
+    }
 
     return app.get_matches();
 }
