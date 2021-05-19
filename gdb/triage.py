@@ -288,7 +288,6 @@ def capture_backtrace(primary=True, detailed=False, frame_limit=0):
 
         sym["function_name"] = xstr(cframe.name())
 
-        # TODO: only include symbol information when we actually have symbols
         if fsym is not None:
             # NOTE: this is kinda broken on all current GDBs (always returns linkage name)
             # See https://sourceware.org/bugzilla/show_bug.cgi?id=12707

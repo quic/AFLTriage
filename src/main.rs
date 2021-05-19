@@ -65,7 +65,11 @@ fn setup_command_line() -> ArgMatches<'static> {
                                .takes_value(true)
                                .required(true)
                                .multiple(true)
-                               .help("A path to a single testcase, directory of testcases, AFL directory, and/or directory of AFL directories to be triaged."))
+                               .help("A list of paths to a testcase, directory of testcases, AFL directory, and/or directory of AFL directories to be triaged.")
+                               .long_help("A list of paths to a testcase, directory of testcases, AFL directory, \
+                                     and/or directory of AFL directories to be triaged. Note that this arg \
+                                     takes multiple inputs in a row (e.g. -i input1 input2...) so it cannot be the last \
+                                     argument passed to AFLTriage -- this is reserved for the command."))
                           .arg(Arg::with_name("dryrun")
                                .long("--dry-run")
                                .takes_value(false)
@@ -106,7 +110,7 @@ fn setup_command_line() -> ArgMatches<'static> {
                           .arg(Arg::with_name("command")
                                .multiple(true)
                                .required(true)
-                               .help("The binary executable and args to execute. Use '@@' as a placeholder for the path to the input file or --stdin."));
+                               .help("The binary executable and args to execute. Use '@@' as a placeholder for the path to the input file or --stdin. Optionally use -- to delimit the start of the command."));
 
     if env::args().len() <= 1 {
         app.print_help();

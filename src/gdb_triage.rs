@@ -193,41 +193,58 @@ macro_rules! vec_of_strings {
 }
 
 struct DbgMarker {
-    start: String,
-    end: String
+    start: &'static str,
+    end: &'static str,
+    gdb_start: &'static str,
+    gdb_end: &'static str,
 }
 
-fn make_marker(tag: &str) -> DbgMarker {
-    DbgMarker {
-        start: String::from(String::from("----") + tag + "_START----"),
-        end: String::from(String::from("----") + tag + "_END----"),
+impl DbgMarker {
+    fn extract<'a>(&self, text: &'a str) -> Result<&'a str, String> {
+        match text.find(&self.start) {
+            Some(mut start_idx) => {
+                match text.find(&self.end) {
+                    Some(end_idx) => {
+                        // assuming its printed as a newline
+                        start_idx += self.start.len()+1;
+
+                        if start_idx <= end_idx {
+                            Ok(&text[start_idx..end_idx])
+                        } else {
+                            Err(String::from("Start marker and end marker out-of-order"))
+                        }
+                    }
+                    None => Err(String::from(format!("Could not find {}", self.end)))
+                }
+            }
+            None => Err(String::from(format!("Could not find {}", self.start)))
+        }
     }
+}
+
+// This is a neat trick to cut up the output we get from GDB into parts without having to
+// join stderr and stdout into a single stream
+// Some versions of GDB don't flush output before starting a child, so explicitly flush
+macro_rules! make_gdb_marker {
+    ( $string:expr ) => (
+        concat!("python [(x.write('", $string, "\\n'),x.flush()) for x in [sys.stdout, sys.stderr]]")
+    );
+}
+
+macro_rules! make_marker {
+    ( $string:expr ) => (
+        DbgMarker {
+            start: concat!("----", $string, "_START----"),
+            end: concat!("----", $string, "_END----"),
+            gdb_start: make_gdb_marker!(concat!("----", $string, "_START----")),
+            gdb_end: make_gdb_marker!(concat!("----", $string, "_END----")),
+        }
+    );
 }
 
 lazy_static! {
-    static ref MARKER_CHILD_OUTPUT: DbgMarker = make_marker("AFLTRIAGE_CHILD_OUTPUT");
-    static ref MARKER_BACKTRACE: DbgMarker = make_marker("AFLTRIAGE_BACKTRACE");
-}
-
-fn extract_marker<'a>(text: &'a str, marker: &DbgMarker) -> Result<&'a str, String> {
-    match text.find(&marker.start) {
-        Some(mut start_idx) => {
-            match text.find(&marker.end) {
-                Some(end_idx) => {
-                    // assuming its printed as a newline
-                    start_idx += marker.start.len()+1;
-
-                    if start_idx <= end_idx {
-                        Ok(&text[start_idx..end_idx])
-                    } else {
-                        Err(String::from("Start marker and end marker out-of-order"))
-                    }
-                }
-                None => Err(String::from(format!("Could not find {}", marker.end)))
-            }
-        }
-        None => Err(String::from(format!("Could not find {}", marker.start)))
-    }
+    static ref MARKER_CHILD_OUTPUT: DbgMarker = make_marker!("AFLTRIAGE_CHILD_OUTPUT");
+    static ref MARKER_BACKTRACE: DbgMarker = make_marker!("AFLTRIAGE_BACKTRACE");
 }
 
 enum GdbTriageScript {
@@ -306,24 +323,23 @@ impl GdbTriager {
             None => format!("run"),
         };
 
-        // TODO: timeout
-        // TODO: memory limit
+        // TODO: memory limit?
         let gdb_args = vec_of_strings!(
                             "--batch", "--nx",
                             "-iex", "set index-cache on",
                             "-iex", "set index-cache directory gdb_cache",
                             // write the marker to both stdout and stderr as they are not interleaved
-                            "-ex", format!("python [x.write('{}\\n') for x in [sys.stdout, sys.stderr]]", &MARKER_CHILD_OUTPUT.start),
+                            "-ex", MARKER_CHILD_OUTPUT.gdb_start,
                             "-ex", "set logging file /dev/null",
                             "-ex", "set logging redirect on",
                             "-ex", "set logging on",
                             "-ex", gdb_run_command,
                             "-ex", "set logging redirect off",
                             "-ex", "set logging off",
-                            "-ex", format!("python [x.write('{}\\n') for x in [sys.stdout, sys.stderr]]", &MARKER_CHILD_OUTPUT.end),
-                            "-ex", format!("python [x.write('{}\\n') for x in [sys.stdout, sys.stderr]]", &MARKER_BACKTRACE.start),
+                            "-ex", MARKER_CHILD_OUTPUT.gdb_end,
+                            "-ex", MARKER_BACKTRACE.gdb_start,
                             "-x", triage_script_path.to_str().unwrap(),
-                            "-ex", format!("python [x.write('{}\\n') for x in [sys.stdout, sys.stderr]]", &MARKER_BACKTRACE.end),
+                            "-ex", MARKER_BACKTRACE.gdb_end,
                             "--args");
 
         let gdb_cmdline = &[&gdb_args[..], &prog_args[..]].concat();
@@ -348,22 +364,22 @@ impl GdbTriager {
                 prog_args[..].join(" "), gdb_cmd_fmt, decoded_stdout, decoded_stderr);
         }
 
-        let child_output_stdout = match extract_marker(decoded_stdout, &MARKER_CHILD_OUTPUT) {
+        let child_output_stdout = match MARKER_CHILD_OUTPUT.extract(decoded_stdout) {
             Ok(output) => output.to_string(),
             Err(e) => return Err(GdbTriageError::new(GdbTriageErrorKind::ErrorCommand, "Could not extract child STDOUT", e.to_string())),
         };
 
-        let child_output_stderr = match extract_marker(decoded_stderr, &MARKER_CHILD_OUTPUT) {
+        let child_output_stderr = match MARKER_CHILD_OUTPUT.extract(decoded_stderr) {
             Ok(output) => output.to_string(),
             Err(e) => return Err(GdbTriageError::new(GdbTriageErrorKind::ErrorCommand, "Could not extract child STDERR", e.to_string())),
         };
 
-        let backtrace_output = match extract_marker(decoded_stdout, &MARKER_BACKTRACE) {
+        let backtrace_output = match MARKER_BACKTRACE.extract(decoded_stdout) {
             Ok(output) => output,
             Err(e) => return Err(GdbTriageError::new(GdbTriageErrorKind::ErrorCommand, "Failed to get triage JSON from GDB", e.to_string())),
         };
 
-        let backtrace_messages = match extract_marker(decoded_stderr, &MARKER_BACKTRACE) {
+        let backtrace_messages = match MARKER_BACKTRACE.extract(decoded_stderr) {
             Ok(output) => output,
             Err(e) => return Err(GdbTriageError::new(GdbTriageErrorKind::ErrorCommand, "Failed to get triage errors from GDB", e.to_string())),
         };
