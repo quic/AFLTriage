@@ -110,6 +110,7 @@ fn setup_command_line() -> ArgMatches<'static> {
 
     if env::args().len() <= 1 {
         app.print_help();
+        println!("");
         std::process::exit(0);
     }
 

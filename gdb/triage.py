@@ -344,12 +344,12 @@ def capture_backtrace(primary=True, detailed=False, frame_limit=0):
                 info = {}
 
                 vsym = v.sym
-                value = vsym.value(cframe)
 
                 info["type"] = xstr(vsym.type)
                 info["name"] = xstr(vsym.print_name)
 
                 try:
+                    value = vsym.value(cframe)
                     info["value"] = xstr(value)
                 except Exception as e:
                     info["value"] = "<%s>" % (str(e))
@@ -360,12 +360,12 @@ def capture_backtrace(primary=True, detailed=False, frame_limit=0):
                 info = {}
 
                 vsym = v.sym
-                value = vsym.value(cframe)
 
                 info["type"] = xstr(vsym.type)
                 info["name"] = xstr(vsym.print_name)
 
                 try:
+                    value = vsym.value(cframe)
                     info["value"] = xstr(value)
                 except Exception as e:
                     info["value"] = "<%s>" % (str(e))
