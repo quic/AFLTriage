@@ -27,6 +27,17 @@ pub fn elide_size(s: &str, size: usize) -> String {
     }
 }
 
+pub fn tail_string<'a>(chars: &'a str, limit: usize) -> Vec<&'a str> {
+    let mut lines: Vec<&str> = chars
+        .rsplit("\n")
+        .take(limit)
+        .collect::<Vec<&str>>();
+
+    lines.reverse();
+
+    lines
+}
+
 pub fn sanitize(name: &str) -> String {
     let mut s = ALLOWED_CHARS.replace_all(name, "_").to_string();
     // TODO: sanitize entire string 

@@ -95,6 +95,11 @@ fn setup_command_line() -> ArgMatches<'static> {
                           .arg(Arg::with_name("child_output")
                                .long("--child-output")
                                .help("Include child output in triage reports."))
+                          .arg(Arg::with_name("child_output_lines")
+                               .long("--child-output-lines")
+                               .default_value("25")
+                               .takes_value(true)
+                               .help("How many lines of program output from the target to include in reports. Use 0 to mean unlimited lines (not recommended)."))
                           .arg(Arg::with_name("ofmt")
                                .long("--output-format")
                                .takes_value(true)
@@ -543,6 +548,14 @@ fn main() {
     let debug = args.is_present("debug");
     let child_output = args.is_present("child_output");
 
+    let child_output_lines = match value_t!(args, "child_output_lines", usize) {
+        Ok(n) => n,
+        Err(e) => {
+            log::error!("Child output lines parse error");
+            return
+        }
+    };
+
     let timeout_ms = value_t!(args, "timeout", u64).unwrap_or_else(|_| 60000);
 
     if timeout_ms < 1000 {
@@ -638,14 +651,38 @@ fn main() {
                         text_report += &format!("ASAN Report:\n{}\n", report.asan_body);
                     }
 
+                    let mut format_output = |name: &str, output: &str| {
+                        if output.is_empty() {
+                            text_report.push_str(&format!("\nChild {} (no output):\n", name));
+                        } else {
+                            match child_output_lines {
+                                0 => {
+                                    text_report.push_str(&format!("\nChild {} (everything):\n{}\n", name, output));
+                                }
+                                _ => {
+                                    let lines = util::tail_string(output, child_output_lines);
+                                    text_report.push_str(&format!("\nChild {} (last {} lines):\n",
+                                        name, child_output_lines));
+                                    for (i, line) in lines.iter().enumerate() {
+                                        if line.is_empty() && i+1 == lines.len() {
+                                            break
+                                        }
+                                        text_report.push_str(&format!("{}\n", line));
+                                    }
+                                }
+                            }
+                        }
+                    };
+
                     if child_output {
+                        // Dont include the ASAN report duplicated in the child's STDERR
                         let stderr = match report.asan_body.is_empty() {
                             false => triage.child.stderr.replace(&report.asan_body, "<ASAN Report>"),
                             true => triage.child.stderr,
                         };
 
-                        text_report += &format!("\nChild STDOUT:\n{}\n\nChild STDERR:\n{}\n",
-                            triage.child.stdout, stderr);
+                        format_output("STDOUT", &triage.child.stdout);
+                        format_output("STDERR", &stderr);
                     }
 
                     if output_dir.is_none() {
