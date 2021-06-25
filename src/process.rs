@@ -31,6 +31,8 @@ pub fn execute_capture_output<S: AsRef<OsStr>>(command: &str, args: &Vec<S>) -> 
 pub fn execute_capture_output_stdin<S: AsRef<OsStr>>(command: &str, args: &Vec<S>, stdin: &str) -> Result<ChildResult> {
     let mut child = Command::new(command)
             .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .args(args)
             .spawn()?;
 
