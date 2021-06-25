@@ -339,6 +339,7 @@ impl GdbTriager {
                             "-ex", MARKER_CHILD_OUTPUT.gdb_end,
                             "-ex", MARKER_BACKTRACE.gdb_start,
                             "-x", triage_script_path.to_str().unwrap(),
+                            "-ex", "gdbtriage",
                             "-ex", MARKER_BACKTRACE.gdb_end,
                             "--args");
 

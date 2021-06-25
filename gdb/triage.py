@@ -583,28 +583,32 @@ def get_module_sections():
 def get_primary_module_path():
     return gdb.progspaces()[0].filename
 
-def main():
-    if not hasattr(gdb, "FrameDecorator"):
-        raise ImportError("GDB 7.10 and above must be used")
+class GDBTriageCommand(gdb.Command):
+    def __init__(self):
+        gdb.Command.__init__(self, "gdbtriage", gdb.COMMAND_OBSCURE)
 
-    # Unfortunately due to a bug in GDB (I suspect)
-    # Listing source code with `list loc1,loc1` to get a single line, breaks on header files
-    # Hence we need to set the listsize 1. We don't want to open or interact with source code
-    # directly as we don't want to be responsible for possibly messing with its filesystem state
-    gdb.execute("set listsize 1", to_string=True)
+    def invoke(self, argstr, from_tty):
+        if not hasattr(gdb, "FrameDecorator"):
+            raise ImportError("GDB 7.10 and above must be used")
 
-    # TODO: only do this on i386/x86_64
-    gdb.execute("set disassembly-flavor intel", to_string=True)
+        # Unfortunately due to a bug in GDB (I suspect)
+        # Listing source code with `list loc1,loc1` to get a single line, breaks on header files
+        # Hence we need to set the listsize 1. We don't want to open or interact with source code
+        # directly as we don't want to be responsible for possibly messing with its filesystem state
+        gdb.execute("set listsize 1", to_string=True)
 
-    # TODO: undo "set"'s to restore GDB state
+        # TODO: only do this on i386/x86_64
+        gdb.execute("set disassembly-flavor intel", to_string=True)
 
-    bt = backtrace_all()
+        # TODO: undo "set"'s to restore GDB state
 
-    if bt:
-        response = {"result": bt}
-    else:
-        response = {}
+        bt = backtrace_all()
 
-    print(json.dumps(response))
+        if bt:
+            response = {"result": bt}
+        else:
+            response = {}
 
-main()
+        print(json.dumps(response))
+
+GDBTriageCommand()
