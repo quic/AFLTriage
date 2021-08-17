@@ -1,19 +1,15 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
-use clap::{arg_enum, Arg, ArgMatches, App, AppSettings};
-use std::path::PathBuf;
+use clap::{arg_enum, App, AppSettings, Arg, ArgMatches};
+use indicatif::{ProgressBar, ProgressStyle};
 use is_executable::IsExecutable;
-use std::collections::{HashSet, HashMap};
-use std::cmp;
-use which::which;
-use std::env;
-use regex::Regex;
-use std::sync::{Arc, Mutex};
-use md5;
-use libc;
-use indicatif::{ProgressBar, ProgressStyle, ProgressIterator, ParallelProgressIterator};
 use rayon::prelude::*;
+use regex::Regex;
+use std::collections::{HashMap, HashSet};
+use std::env;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 #[macro_use]
 extern crate lazy_static;
@@ -23,16 +19,16 @@ extern crate clap;
 extern crate num_cpus;
 
 pub mod afl;
-pub mod util;
-pub mod process;
 pub mod gdb_triage;
-pub mod report;
 pub mod platform;
+pub mod process;
+pub mod report;
+pub mod util;
 
-use gdb_triage::{GdbTriager, GdbTriageResult, GdbTriageError};
+use gdb_triage::{GdbTriageError, GdbTriageResult, GdbTriager};
 use process::ChildResult;
 
-const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 arg_enum! {
     #[derive(PartialEq, Debug)]
@@ -118,18 +114,12 @@ fn setup_command_line() -> ArgMatches<'static> {
                                .help("The binary executable and args to execute. Use '@@' as a placeholder for the path to the input file or --stdin. Optionally use -- to delimit the start of the command."));
 
     if env::args().len() <= 1 {
-        app.print_help();
-        println!("");
+        app.print_help().unwrap();
+        println!();
         std::process::exit(0);
     }
 
-    return app.get_matches();
-}
-
-struct TestcaseResult<'a> {
-    testcase: &'a str,
-    result: TriageResult,
-    report: Option<report::CrashReport>
+    app.get_matches()
 }
 
 struct TriageState {
@@ -150,43 +140,41 @@ enum TriageResult {
 
 fn process_test_case(
     gdb: &GdbTriager,
-    binary_args: &Vec<&str>,
+    binary_args: &[&str],
     testcase: &str,
     debug: bool,
     input_stdin: bool,
-    timeout_ms: u64) -> TriageResult {
-
+    timeout_ms: u64,
+) -> TriageResult {
     let mut prog_args: Vec<String> = Vec::new();
 
     for arg in binary_args.iter() {
-        if arg.to_string() == "@@" {
+        if *arg == "@@" {
             prog_args.push(testcase.to_string());
         } else {
-            prog_args.push(arg.to_string());
+            prog_args.push((*arg).to_string());
         }
     }
 
     // Whether to pass a file in via GDB stdin
-    let input_file = match input_stdin {
-        true => Some(testcase),
-        false => None,
-    };
+    let input_file = if input_stdin { Some(testcase) } else { None };
 
-    let triage_result: GdbTriageResult = match gdb.triage_program(prog_args, input_file, debug, timeout_ms) {
-        Ok(triage_result) => triage_result,
-        Err(e) => {
-            if e.error_kind == gdb_triage::GdbTriageErrorKind::ErrorTimeout {
-                return TriageResult::Timedout;
-            } else {
-                return TriageResult::Error(e);
+    let triage_result: GdbTriageResult =
+        match gdb.triage_program(&prog_args, input_file, debug, timeout_ms) {
+            Ok(triage_result) => triage_result,
+            Err(e) => {
+                if e.error_kind == gdb_triage::GdbTriageErrorKind::Timeout {
+                    return TriageResult::Timedout;
+                } else {
+                    return TriageResult::Error(e);
+                }
             }
-        },
-    };
+        };
 
     if triage_result.response.result.is_none() {
-        return TriageResult::NoCrash(triage_result.child);
+        TriageResult::NoCrash(triage_result.child)
     } else {
-        return TriageResult::Crash(triage_result);
+        TriageResult::Crash(triage_result)
     }
 }
 
@@ -195,25 +183,26 @@ enum UserInputPathType {
     Missing,
     Single,
     PlainDir,
-    AflDir
+    AflDir,
 }
 
 struct UserInputPath {
     ty: UserInputPathType,
     path: PathBuf,
-    fuzzer_stats: Option<afl::AflStats>
+    fuzzer_stats: Option<afl::AflStats>,
 }
 
 struct Testcase {
     path: PathBuf,
     /// Must be safe for filesystem
-    unique_id: String
+    #[allow(dead_code)]
+    unique_id: String,
 }
 
-fn determine_input_type(input: &PathBuf) -> UserInputPathType {
+fn determine_input_type(input: &Path) -> UserInputPathType {
     let metadata = match input.symlink_metadata() {
         Ok(meta) => meta,
-        Err(_) => return UserInputPathType::Missing
+        Err(_) => return UserInputPathType::Missing,
     };
 
     if metadata.file_type().is_file() {
@@ -221,9 +210,10 @@ fn determine_input_type(input: &PathBuf) -> UserInputPathType {
     }
 
     // looks like an AFL dir
-    if input.join("fuzzer_stats").exists() ||
-       input.join("queue").exists() ||
-       input.join("crashes").exists() {
+    if input.join("fuzzer_stats").exists()
+        || input.join("queue").exists()
+        || input.join("crashes").exists()
+    {
         return UserInputPathType::AflDir;
     }
 
@@ -231,33 +221,34 @@ fn determine_input_type(input: &PathBuf) -> UserInputPathType {
         return UserInputPathType::PlainDir;
     }
 
-    return UserInputPathType::Unknown;
+    UserInputPathType::Unknown
 }
 
-fn sanity_check(gdb: &GdbTriager, binary_args: &Vec<&str>) -> bool {
+fn sanity_check(gdb: &GdbTriager, binary_args: &[&str]) -> bool {
     let rawexe = binary_args.get(0).unwrap();
     let exe = PathBuf::from(rawexe);
-    let justfilename = exe.file_name().unwrap_or_else(|| std::ffi::OsStr::new("")).to_str().unwrap();
+    let justfilename = exe
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new(""))
+        .to_str()
+        .unwrap();
 
     // A PATH resolvable name
-    if justfilename == rawexe.to_string() {
-        match which::which(rawexe) {
-            Err(_) => {
-                log::error!("Binary {} not found in PATH. Try using the absolute path",
-                         rawexe);
-                return false
-            }
-            _ => ()
-        }
-    } else {
-        if !exe.is_executable() {
-            log::error!("Binary {} does not exist or is not executable", rawexe);
+    if justfilename == *rawexe {
+        if which::which(rawexe).is_err() {
+            log::error!(
+                "Binary {} not found in PATH. Try using the absolute path",
+                rawexe
+            );
             return false;
         }
+    } else if !exe.is_executable() {
+        log::error!("Binary {} does not exist or is not executable", rawexe);
+        return false;
     }
 
     if !gdb.has_supported_gdb() {
-        return false
+        return false;
     }
 
     // Undocumented Glibc env var that prevents it from printing to /dev/tty, which isn't captured by GDB
@@ -269,32 +260,33 @@ fn sanity_check(gdb: &GdbTriager, binary_args: &Vec<&str>) -> bool {
             log::warn!("Using ASAN_OPTIONS=\"{}\" that was set by the environment. This can change triage result accuracy", val);
 
             let re = Regex::new(r"abort_on_error=(1|true)").unwrap();
-            match re.find(&val) {
-                None => {
-                    log::error!("ASAN_OPTIONS does not have required abort_on_error=1 option");
-                    return false;
-                }
-                _ => ()
+            if re.find(&val).is_none() {
+                log::error!("ASAN_OPTIONS does not have required abort_on_error=1 option");
+                return false;
             }
         }
-        Err(_) => env::set_var("ASAN_OPTIONS", "abort_on_error=1:allow_user_segv_handler=0:symbolize=1,detect_leaks=0")
+        Err(_) => env::set_var(
+            "ASAN_OPTIONS",
+            "abort_on_error=1:allow_user_segv_handler=0:symbolize=1,detect_leaks=0",
+        ),
     }
 
     match env::var("ASAN_SYMBOLIZER_PATH") {
         Ok(val) => {
-            log::info!("Using ASAN_SYMBOLIZER_PATH=\"{}\" that was set by the environment", val);
+            log::info!(
+                "Using ASAN_SYMBOLIZER_PATH=\"{}\" that was set by the environment",
+                val
+            );
         }
-        Err(_) => {
-            match which::which("addr2line") {
-                Ok(path) => {
-                    env::set_var("ASAN_SYMBOLIZER_PATH", path.to_str().unwrap());
-                    log::info!("Using ASAN_SYMBOLIZER_PATH=\"{}\"", path.to_str().unwrap());
-                }
-                _ => {
-                    log::warn!("No ASAN_SYMBOLIZER_PATH found. Consider setting it to llvm-symbolizer or addr2line if your target is using ASAN");
-                }
+        Err(_) => match which::which("addr2line") {
+            Ok(path) => {
+                env::set_var("ASAN_SYMBOLIZER_PATH", path.to_str().unwrap());
+                log::info!("Using ASAN_SYMBOLIZER_PATH=\"{}\"", path.to_str().unwrap());
             }
-        }
+            _ => {
+                log::warn!("No ASAN_SYMBOLIZER_PATH found. Consider setting it to llvm-symbolizer or addr2line if your target is using ASAN");
+            }
+        },
     }
 
     true
@@ -302,44 +294,40 @@ fn sanity_check(gdb: &GdbTriager, binary_args: &Vec<&str>) -> bool {
 
 fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Testcase> {
     let mut all_testcases = Vec::new();
-    let mut ids = util::UniqueIdFactory::new();
 
     for input in processed_inputs {
-        let pathStr = input.path.to_str().unwrap();
+        let path_str = input.path.to_str().unwrap();
 
         match input.ty {
             UserInputPathType::Single => {
-                log::info!("Triaging single {}", pathStr);
+                log::info!("Triaging single {}", path_str);
                 all_testcases.push(Testcase {
-                    unique_id: ids.from_path(&input.path.as_path()),
-                    path: input.path.clone()
+                    unique_id: "".to_string(),
+                    path: input.path.clone(),
                 });
-            },
+            }
             UserInputPathType::PlainDir => {
-                match afl::afl_list_testcases(input.path.as_path()) {
-                    Ok(tcs) => {
-                        let mut valid = 0;
-                        for tc in tcs {
-                            if tc.is_file() {
-                                valid += 1;
-                                all_testcases.push(Testcase {
-                                    unique_id: ids.from_path(&tc),
-                                    path: tc
-                                });
-                            }
-                        }
-
-                        if valid > 0 {
-                            log::info!("Triaging plain directory {} ({} files)",
-                                pathStr, valid);
-                        } else {
-                            log::warn!("No files found in directory {}",
-                                pathStr);
+                if let Ok(tcs) = afl::afl_list_testcases(input.path.as_path()) {
+                    let mut valid = 0;
+                    for tc in tcs {
+                        if tc.is_file() {
+                            valid += 1;
+                            all_testcases.push(Testcase {
+                                unique_id: "".to_string(),
+                                path: tc,
+                            });
                         }
                     }
-                    _ => log::warn!("Failed to get files from directory {}", pathStr)
+
+                    if valid > 0 {
+                        log::info!("Triaging plain directory {} ({} files)", path_str, valid);
+                    } else {
+                        log::warn!("No files found in directory {}", path_str);
+                    }
+                } else {
+                    log::warn!("Failed to get files from directory {}", path_str);
                 }
-            },
+            }
             UserInputPathType::AflDir => {
                 match afl::afl_list_testcases(input.path.join("crashes").as_path()) {
                     Ok(tcs) => {
@@ -353,26 +341,28 @@ fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Tes
 
                                 valid += 1;
                                 all_testcases.push(Testcase {
-                                    unique_id: ids.from_path(&tc),
-                                    path: tc
+                                    unique_id: "".to_string(),
+                                    path: tc,
                                 });
                             }
                         }
 
                         if valid > 0 {
-                            log::info!("Triaging AFL directory {} ({} files)",
-                                pathStr, valid);
+                            log::info!("Triaging AFL directory {} ({} files)", path_str, valid);
                         } else {
-                            log::warn!("No crashes found in AFL directory {}", pathStr);
+                            log::warn!("No crashes found in AFL directory {}", path_str);
                         }
                     }
-                    Err(e) => log::warn!("Failed to get AFL crashes from directory {}: {}",
-                                       pathStr, e)
+                    Err(e) => log::warn!(
+                        "Failed to get AFL crashes from directory {}: {}",
+                        path_str,
+                        e
+                    ),
                 }
 
-                let fuzzer_stats = match afl::parse_afl_fuzzer_stats(input.path.join("fuzzer_stats").as_path()) {
-                    Ok(s) => {
-                        match afl::validate_afl_fuzzer_stats(s) {
+                let fuzzer_stats =
+                    match afl::parse_afl_fuzzer_stats(input.path.join("fuzzer_stats").as_path()) {
+                        Ok(s) => match afl::validate_afl_fuzzer_stats(&s) {
                             Ok(s2) => {
                                 log::info!("├─ Banner: {}", s2.afl_banner);
                                 log::info!("├─ Command line: \"{}\"", s2.command_line);
@@ -383,17 +373,16 @@ fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Tes
                                 log::warn!("Failed to validate AFL fuzzer_stats: {}", e);
                                 None
                             }
+                        },
+                        Err(_e) => {
+                            log::warn!("AFL directory is missing fuzzer_stats");
+                            None
                         }
-                    }
-                    Err(e) => {
-                        log::warn!("AFL directory is missing fuzzer_stats");
-                        None
-                    }
-                };
+                    };
 
                 input.fuzzer_stats = fuzzer_stats;
-            },
-            _ => log::warn!("Skipping unknown or missing path {}", pathStr),
+            }
+            _ => log::warn!("Skipping unknown or missing path {}", path_str),
         }
     }
 
@@ -413,12 +402,10 @@ fn init_logger() {
         .format(|buf, record| {
             let mut style = buf.style();
 
-            let timestamp = buf.timestamp();
+            let _timestamp = buf.timestamp();
 
             let level_name = match record.level() {
-                Level::Info => {
-                    "[+]".to_string()
-                }
+                Level::Info => "[+]".to_string(),
                 Level::Warn => {
                     style.set_color(Color::Yellow).set_intense(true);
                     "[!]".to_string()
@@ -437,7 +424,7 @@ fn init_logger() {
                 style.value(record.args())
             )
         })
-    .init();
+        .init();
 }
 
 fn main() {
@@ -464,28 +451,23 @@ fn main() {
     let gdb: GdbTriager = GdbTriager::new();
 
     if !sanity_check(&gdb, &binary_args) {
-        return
+        return;
     }
 
     let input_stdin = args.is_present("stdin");
+    let has_atat = binary_args.iter().any(|s| *s == "@@");
 
     if input_stdin {
         log::info!("Providing testcase input via stdin");
 
-        match binary_args.iter().find(|s| s.to_string() == "@@") {
-            Some(_) => {
-                log::warn!("Image triage args contains @@ but you are using --stdin");
-            }
-            _ => ()
+        if has_atat {
+            log::warn!("Image triage args contains @@ but you are using --stdin");
         }
-    } else {
-        match binary_args.iter().find(|s| s.to_string() == "@@") {
-            None => {
-                log::error!("Image triage args missing file placeholder: @@. If you'd like to pass input to the child via stdin, use the --stdin option.");
-                return
-            }
-            _ => ()
-        }
+    }
+
+    if !has_atat {
+        log::error!("Image triage args missing file placeholder: @@. If you'd like to pass input to the child via stdin, use the --stdin option.");
+        return;
     }
 
     let binary_cmdline = binary_args.join(" ");
@@ -494,27 +476,24 @@ fn main() {
 
     let output = args.value_of("output").unwrap();
 
-    let output_dir = match output {
-        "-" => None,
-        _ => {
-            let d = std::path::PathBuf::from(output);
-            match std::fs::create_dir(&d) {
-                Err(e) => match e.kind() {
-                    std::io::ErrorKind::AlreadyExists => (),
-                    _ => {
-                        log::error!("Error creating output directory: {}", e);
-                        return;
-                    }
-                },
-                _ => ()
-            }
+    // Output to the terminal
+    let output_dir = if output == "-" {
+        None
+    } else {
+        let d = std::path::PathBuf::from(output);
 
-            Some(d)
+        if let Err(e) = std::fs::create_dir(&d) {
+            if e.kind() != std::io::ErrorKind::AlreadyExists {
+                log::error!("Error creating output directory: {}", e);
+                return;
+            }
         }
+
+        Some(d)
     };
 
-    match &output_dir { 
-        Some(d) =>log::info!("Reports will be output to directory \"{}\"", output),
+    match &output_dir {
+        Some(_) => log::info!("Reports will be output to directory \"{}\"", output),
         None => log::info!("Reports output to terminal"),
     }
 
@@ -527,7 +506,9 @@ fn main() {
         let ty = determine_input_type(&path);
 
         processed_inputs.push(UserInputPath {
-            ty, path, fuzzer_stats: None
+            ty,
+            path,
+            fuzzer_stats: None,
         });
     }
 
@@ -535,12 +516,12 @@ fn main() {
 
     if all_testcases.is_empty() {
         log::error!("No testcases found!");
-        return
+        return;
     }
 
     if args.is_present("dryrun") {
         log::error!("Exiting due to dry run");
-        return
+        return;
     }
 
     log::info!("Triaging {} testcases", all_testcases.len());
@@ -548,12 +529,11 @@ fn main() {
     let debug = args.is_present("debug");
     let child_output = args.is_present("child_output");
 
-    let child_output_lines = match value_t!(args, "child_output_lines", usize) {
-        Ok(n) => n,
-        Err(e) => {
-            log::error!("Child output lines parse error");
-            return
-        }
+    let child_output_lines = if let Ok(n) = value_t!(args, "child_output_lines", usize) {
+        n
+    } else {
+        log::error!("Child output lines parse error");
+        return;
     };
 
     let timeout_ms = value_t!(args, "timeout", u64).unwrap_or_else(|_| 60000);
@@ -564,16 +544,19 @@ fn main() {
         log::info!("Triage timeout set to {}ms", timeout_ms);
     }
 
-    let requested_job_count = value_t!(args, "jobs", usize).unwrap_or_else(|e| num_cpus::get() / 2); 
+    let requested_job_count = value_t!(args, "jobs", usize).unwrap_or_else(|_| num_cpus::get() / 2);
     let job_count = std::cmp::max(1, std::cmp::min(requested_job_count, all_testcases.len()));
 
     log::info!("Using {} threads to triage", job_count);
 
-    rayon::ThreadPoolBuilder::new().num_threads(job_count).build_global().unwrap();
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(job_count)
+        .build_global()
+        .unwrap();
 
     let pb = ProgressBar::new((&all_testcases).len() as u64);
 
-    let display_progress = isatty() && !output_dir.is_none() && !debug;
+    let display_progress = isatty() && output_dir.is_some() && !debug;
 
     if display_progress {
         pb.set_style(ProgressStyle::default_bar()
@@ -582,14 +565,13 @@ fn main() {
         pb.enable_steady_tick(200);
     }
 
-    let write_message: Box<dyn Fn(String) + Sync> = match display_progress {
-        true => Box::new(|msg| {
-            pb.set_message(&msg)
-        }),
-        false => Box::new(|msg| { log::info!("{}", msg) })
+    let write_message: Box<dyn Fn(String) + Sync> = if display_progress {
+        Box::new(|msg| pb.set_message(&msg))
+    } else {
+        Box::new(|msg| log::info!("{}", msg))
     };
 
-    write_message(format!("Processing initial {} test cases", job_count).into());
+    write_message(format!("Processing initial {} test cases", job_count));
 
     let state = Arc::new(Mutex::new(TriageState {
         crashed: 0,
@@ -605,7 +587,7 @@ fn main() {
         let result = process_test_case(&gdb, &binary_args, path, debug, input_stdin, timeout_ms);
 
         let report = match &result {
-            TriageResult::Crash(triage) => Some(report::format_text_report(&triage)),
+            TriageResult::Crash(triage) => Some(report::format_text_report(triage)),
             _ => None,
         };
 
@@ -619,7 +601,7 @@ fn main() {
         }*/
 
         match result {
-            TriageResult::NoCrash(child) => {
+            TriageResult::NoCrash(_child) => {
                 state.no_crash += 1;
 
                 //write_message("No crash".into());
@@ -641,7 +623,8 @@ fn main() {
 
                     let mut text_report = format!(
                         "Summary: {}\nCommand line: {}\nTestcase: {}\nStack hash: {}\n\n",
-                             report.headline, binary_cmdline, path, report.stackhash);
+                        report.headline, binary_cmdline, path, report.stackhash
+                    );
 
                     text_report += &format!("Register info:\n{}\n", report.register_info);
                     text_report += &format!("Crash context:\n{}\n", report.crash_context);
@@ -654,31 +637,33 @@ fn main() {
                     let mut format_output = |name: &str, output: &str| {
                         if output.is_empty() {
                             text_report.push_str(&format!("\nChild {} (no output):\n", name));
+                        } else if child_output_lines == 0 {
+                            text_report
+                                .push_str(&format!("\nChild {} (everything):\n{}\n", name, output));
                         } else {
-                            match child_output_lines {
-                                0 => {
-                                    text_report.push_str(&format!("\nChild {} (everything):\n{}\n", name, output));
+                            let lines = util::tail_string(output, child_output_lines);
+                            text_report.push_str(&format!(
+                                "\nChild {} (last {} lines):\n",
+                                name, child_output_lines
+                            ));
+                            for (i, line) in lines.iter().enumerate() {
+                                if line.is_empty() && i + 1 == lines.len() {
+                                    break;
                                 }
-                                _ => {
-                                    let lines = util::tail_string(output, child_output_lines);
-                                    text_report.push_str(&format!("\nChild {} (last {} lines):\n",
-                                        name, child_output_lines));
-                                    for (i, line) in lines.iter().enumerate() {
-                                        if line.is_empty() && i+1 == lines.len() {
-                                            break
-                                        }
-                                        text_report.push_str(&format!("{}\n", line));
-                                    }
-                                }
+                                text_report.push_str(&format!("{}\n", line));
                             }
                         }
                     };
 
                     if child_output {
                         // Dont include the ASAN report duplicated in the child's STDERR
-                        let stderr = match report.asan_body.is_empty() {
-                            false => triage.child.stderr.replace(&report.asan_body, "<ASAN Report>"),
-                            true => triage.child.stderr,
+                        let stderr = if report.asan_body.is_empty() {
+                            triage.child.stderr
+                        } else {
+                            triage
+                                .child
+                                .stderr
+                                .replace(&report.asan_body, "<ASAN Report>")
                         };
 
                         format_output("STDOUT", &triage.child.stdout);
@@ -686,24 +671,24 @@ fn main() {
                     }
 
                     if output_dir.is_none() {
-                        write_message(
-                            format!(
-                                "--- REPORT BEGIN ---\n{}\n--- REPORT END ---",
-                                text_report,
-                            )
-                        );
+                        write_message(format!(
+                            "--- REPORT BEGIN ---\n{}\n--- REPORT END ---",
+                            text_report,
+                        ));
                     } else {
                         let output_dir = output_dir.as_ref().unwrap();
-                        let report_filename = format!("afltriage_{}_{}.txt",
-                            util::sanitize(&report.terse_headline), &report.stackhash[..8]);
+                        let report_filename = format!(
+                            "afltriage_{}_{}.txt",
+                            util::sanitize(&report.terse_headline),
+                            &report.stackhash[..8]
+                        );
 
-                        match std::fs::write(output_dir.join(report_filename), text_report) {
-                            Err(e) => {
-                                // TODO: notify / exit early
-                                let failed_to_write = format!("Failed to write report: {}", e);
-                                write_message(failed_to_write);
-                            }
-                            _ => (),
+                        if let Err(e) =
+                            std::fs::write(output_dir.join(report_filename), text_report)
+                        {
+                            // TODO: notify / exit early
+                            let failed_to_write = format!("Failed to write report: {}", e);
+                            write_message(failed_to_write);
                         }
                     }
                 }
@@ -714,7 +699,7 @@ fn main() {
                 write_message(format!("ERROR: {}", gdb_error.error));
 
                 if let Some(x) = state.unique_errors.get_mut(&gdb_error) {
-                    *x += 1
+                    *x += 1;
                 } else {
                     state.unique_errors.insert(gdb_error, 1);
                 }
@@ -735,17 +720,26 @@ fn main() {
     let state = state.lock().unwrap();
     let total = all_testcases.len();
 
-    log::info!("Triage stats [Crashes: {} (unique {}), No crash: {}, Timeout: {}, Errored: {}]",
-        state.crashed, state.crash_signature.len(), state.no_crash, state.timedout, state.errored);
+    log::info!(
+        "Triage stats [Crashes: {} (unique {}), No crash: {}, Timeout: {}, Errored: {}]",
+        state.crashed,
+        state.crash_signature.len(),
+        state.no_crash,
+        state.timedout,
+        state.errored
+    );
 
     if state.errored == total {
         // TODO: handle timeout/memory limit different vs. internal errors
         log::error!("Something seems to be wrong during triage as all testcases errored.");
-    } 
+    }
 
     if state.errored > 0 {
-        log::warn!("There were {} error(s) ({} unique) during triage",
-            state.errored, state.unique_errors.len());
+        log::warn!(
+            "There were {} error(s) ({} unique) during triage",
+            state.errored,
+            state.unique_errors.len()
+        );
 
         for (err, times) in &state.unique_errors {
             let times = format!("(seen {} time(s))", times);
@@ -753,16 +747,17 @@ fn main() {
             let msg: String = if err.details.is_empty() {
                 format!("{} {}", err.error, times)
             } else if err.details.len() == 1 {
-                format!("{}: {} {}",
+                format!(
+                    "{}: {} {}",
                     err.error,
                     err.details.get(0).unwrap().trim_end(),
-                    times)
+                    times
+                )
             } else {
-                let mut msg = format!("{} {}\n",
-                    err.error, times);
+                let mut msg = format!("{} {}\n", err.error, times);
 
                 for (i, line) in err.details.iter().enumerate() {
-                    msg += &format!("{}: {}\n", i+1, line.trim_end())
+                    msg += &format!("{}: {}\n", i + 1, line.trim_end());
                 }
 
                 msg

@@ -1,57 +1,41 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
-/*use libc;
-pub use libc::{
-    SIGABRT, SIGALRM, SIGBUS, SIGCHLD, SIGCONT, SIGFPE, SIGHUP, SIGILL, SIGINT, SIGIO,
-    SIGKILL, SIGPIPE, SIGPROF, SIGQUIT, SIGSEGV, SIGSTOP, SIGSYS, SIGTERM, SIGTRAP,
-    SIGTSTP, SIGTTIN, SIGTTOU, SIGURG, SIGUSR1, SIGUSR2, SIGVTALRM, SIGWINCH, SIGXCPU,
-    SIGXFSZ,
-};
-
-pub const FAULT_ADDR_SIGNALS: &[c_int] = &[SIGSEGV, SIGILL];*/
-
-//#define SI_FROMUSER(siptr)	((siptr)->si_code <= 0)
-//#define SI_FROMKERNEL(siptr)	((siptr)->si_code > 0)
-
 use num_enum::TryFromPrimitive;
 use std::convert::TryFrom;
 use strum::IntoStaticStr;
 
+// How the Linux kernel assigns SI code namespaces
+//#define SI_FROMUSER(siptr)	((siptr)->si_code <= 0)
+//#define SI_FROMKERNEL(siptr)	((siptr)->si_code > 0)
+
 pub fn si_code_to_string(signal: &str, code: i8) -> &'static str {
-    if code <= 0  {
-        match SI_Generic::try_from(code) {
-            Ok(s) => return s.into(),
-            _ => ()
+    if code <= 0 {
+        if let Ok(s) = SI_Generic::try_from(code) {
+            return s.into();
         }
-    } else {
-        if signal == "SIGILL" {
-            match SI_ILL::try_from(code) {
-                Ok(s) => return s.into(),
-                _ => ()
-            }
-        } else if signal == "SIGFPE" {
-            match SI_FPE::try_from(code) {
-                Ok(s) => return s.into(),
-                _ => ()
-            }
-        } else if signal == "SIGBUS" {
-            match SI_BUS::try_from(code) {
-                Ok(s) => return s.into(),
-                _ => ()
-            }
-        } else if signal == "SIGSEGV" {
-            match SI_SEGV::try_from(code) {
-                Ok(s) => return s.into(),
-                _ => ()
-            }
+    } else if signal == "SIGILL" {
+        if let Ok(s) = SI_ILL::try_from(code) {
+            return s.into();
+        }
+    } else if signal == "SIGFPE" {
+        if let Ok(s) = SI_FPE::try_from(code) {
+            return s.into();
+        }
+    } else if signal == "SIGBUS" {
+        if let Ok(s) = SI_BUS::try_from(code) {
+            return s.into();
+        }
+    } else if signal == "SIGSEGV" {
+        if let Ok(s) = SI_SEGV::try_from(code) {
+            return s.into();
         }
     }
 
     "SI_UNKNOWN"
 }
 
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, clippy::upper_case_acronyms)]
 #[derive(IntoStaticStr, TryFromPrimitive)]
 #[repr(i8)]
 enum SI_Generic {
@@ -67,7 +51,7 @@ enum SI_Generic {
     SI_ASYNCNL = -60,
 }
 
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, clippy::upper_case_acronyms)]
 #[derive(IntoStaticStr, TryFromPrimitive)]
 #[repr(i8)]
 enum SI_ILL {
@@ -84,7 +68,7 @@ enum SI_ILL {
     __ILL_BNDMOD = 11,
 }
 
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, clippy::upper_case_acronyms)]
 #[derive(IntoStaticStr, TryFromPrimitive)]
 #[repr(i8)]
 enum SI_FPE {
@@ -105,7 +89,7 @@ enum SI_FPE {
     FPE_CONDTRAP = 15,
 }
 
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, clippy::upper_case_acronyms)]
 #[derive(IntoStaticStr, TryFromPrimitive)]
 #[repr(i8)]
 enum SI_SEGV {
@@ -120,7 +104,7 @@ enum SI_SEGV {
     SEGV_MTESERR = 9,
 }
 
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, clippy::upper_case_acronyms)]
 #[derive(IntoStaticStr, TryFromPrimitive)]
 #[repr(i8)]
 enum SI_BUS {

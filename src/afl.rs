@@ -1,12 +1,12 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
-use std::fs::{self, File, DirEntry};
-use std::io::{self, BufReader, BufRead, Error};
-use std::str::FromStr;
-use std::path::{Path, PathBuf};
-use std::collections::HashMap;
 use regex::Regex;
+use std::collections::HashMap;
+use std::fs::{self, File};
+use std::io::{self, BufRead, BufReader, Error};
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 #[derive(Debug)]
 pub struct AflStats {
@@ -52,14 +52,11 @@ pub fn parse_afl_fuzzer_stats(filename: &Path) -> Result<HashMap<String, String>
     for line in reader.lines() {
         let good_line = line?;
 
-        match re.captures(&good_line) {
-            Some(caps) => {
-                kv.insert(
-                    caps.get(1).unwrap().as_str().to_string(),
-                    caps.get(2).unwrap().as_str().to_string()
-                );
-            }
-            None => {}
+        if let Some(caps) = re.captures(&good_line) {
+            kv.insert(
+                caps.get(1).unwrap().as_str().to_string(),
+                caps.get(2).unwrap().as_str().to_string(),
+            );
         }
     }
 
@@ -68,33 +65,36 @@ pub fn parse_afl_fuzzer_stats(filename: &Path) -> Result<HashMap<String, String>
 
 pub fn afl_list_testcases(path: &Path) -> io::Result<Vec<PathBuf>> {
     let mut testcases = fs::read_dir(path)?
-            .map(|res| res.map(|e| e.path()))
-            .collect::<Result<Vec<_>, io::Error>>()?;
+        .map(|res| res.map(|e| e.path()))
+        .collect::<Result<Vec<_>, io::Error>>()?;
 
     testcases.sort();
     Ok(testcases)
 }
 
-
+#[allow(clippy::upper_case_acronyms)]
 trait KVConverter {
     fn to_str(&self, key: &str) -> Result<String, String>;
     fn to_num<T: FromStr>(&self, key: &str) -> Result<T, String>;
     fn to_num_percent<T: FromStr>(&self, key: &str) -> Result<T, String>;
 }
 
-impl KVConverter for HashMap<String, String> {
+impl<S: std::hash::BuildHasher> KVConverter for HashMap<String, String, S> {
     fn to_str(&self, key: &str) -> Result<String, String> {
         match self.get(key) {
             Some(v) => Ok(v.to_string()),
-            None => Err(String::from(format!("Missing key {}", key)))
+            None => Err(format!("Missing key {}", key)),
         }
     }
 
     fn to_num<T: FromStr>(&self, key: &str) -> Result<T, String> {
         match self.to_str(key)?.parse::<T>() {
             Ok(res) => Ok(res),
-            Err(_) => Err(String::from(format!("Failed to convert {} to number ({})",
-                                                 key, std::any::type_name::<T>())))
+            Err(_) => Err(format!(
+                "Failed to convert {} to number ({})",
+                key,
+                std::any::type_name::<T>()
+            )),
         }
     }
 
@@ -103,19 +103,23 @@ impl KVConverter for HashMap<String, String> {
         let len = value.len();
 
         if len == 0 {
-            return Err(String::from(format!("Invalid percentage key={} value={}",
-                                            key, value)))
+            return Err(format!("Invalid percentage key={} value={}", key, value));
         }
 
-        match (&value[..len-1]).parse::<T>() {
+        match (&value[..len - 1]).parse::<T>() {
             Ok(res) => Ok(res),
-            Err(_) => Err(String::from(format!("Failed to convert {} to number ({})",
-                                                 key, std::any::type_name::<T>())))
+            Err(_) => Err(format!(
+                "Failed to convert {} to number ({})",
+                key,
+                std::any::type_name::<T>()
+            )),
         }
     }
 }
 
-pub fn validate_afl_fuzzer_stats(kv: HashMap<String, String>) -> Result<AflStats, String> {
+pub fn validate_afl_fuzzer_stats<S: std::hash::BuildHasher>(
+    kv: &HashMap<String, String, S>,
+) -> Result<AflStats, String> {
     Ok(AflStats {
         start_time: kv.to_num("start_time")?,
         last_update: kv.to_num("last_update")?,
@@ -146,7 +150,7 @@ pub fn validate_afl_fuzzer_stats(kv: HashMap<String, String>) -> Result<AflStats
         target_mode: kv.to_str("target_mode")?,
         command_line: kv.to_str("command_line")?,
         slowest_exec_ms: kv.to_num("slowest_exec_ms")?,
-        peak_rss_mb: kv.to_num("peak_rss_mb")?
+        peak_rss_mb: kv.to_num("peak_rss_mb")?,
     })
 
     // TODO: notify on unrecognized stats being parsed to allow for future versions

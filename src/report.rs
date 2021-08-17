@@ -1,12 +1,12 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
-use std::collections::HashSet;
-use crate::gdb_triage::{GdbTriageResult, GdbContextInfo};
-use crate::util::elide_size;
+use crate::gdb_triage::{GdbContextInfo, GdbTriageResult};
 use crate::platform::linux::si_code_to_string;
+use crate::util::elide_size;
 use regex::Regex;
 use std::cmp;
+use std::collections::HashSet;
 
 lazy_static! {
     static ref R_CIDENT: Regex = Regex::new(r#"[_a-zA-Z][_a-zA-Z0-9]{0,30}"#).unwrap();
@@ -16,10 +16,10 @@ lazy_static! {
         (?P<pid>=+[0-9]+=+)\s*ERROR:\s*AddressSanitizer:\s*
         (attempting\s)?(?P<reason>[-_A-Za-z0-9]+)[^\r\n]+[\r\n]+
         (?P<operation>[-_A-Za-z0-9]+)?
-        "#).unwrap();
-
-    static ref R_ASAN_FIRST_FRAME: Regex = Regex::new(
-        r#"#0\s+(?P<frame>0x[a-fA-F0-9]+)"#).unwrap();
+        "#
+    )
+    .unwrap();
+    static ref R_ASAN_FIRST_FRAME: Regex = Regex::new(r#"#0\s+(?P<frame>0x[a-fA-F0-9]+)"#).unwrap();
 }
 
 pub struct CrashReport {
@@ -30,7 +30,7 @@ pub struct CrashReport {
     pub crash_context: String,
     pub asan_body: String,
     pub register_info: String,
-    pub stackhash: String
+    pub stackhash: String,
 }
 
 struct AsanInfo {
@@ -41,45 +41,45 @@ struct AsanInfo {
 }
 
 fn asan_post_process(triage_result: &GdbTriageResult) -> Option<AsanInfo> {
-    let asan_match = R_ASAN_HEADLINE.captures(&triage_result.child.stderr);
-
-    if asan_match.is_none() {
-        return None
-    }
+    let asan_match = R_ASAN_HEADLINE.captures(&triage_result.child.stderr)?;
 
     // cut out the ASAN body from the child's output
-    let asan_headline = asan_match.unwrap();
+    let asan_headline = asan_match;
     let asan_start_marker = asan_headline.name("pid").unwrap().as_str();
 
     // find the bounds of the ASAN print to capture it raw
     let asan_raw_headline = asan_headline.get(0).unwrap();
     let asan_start_pos = asan_raw_headline.start();
 
-    let asan_body = match &triage_result.child.stderr[asan_raw_headline.end()..].find(asan_start_marker) {
-        Some(asan_end_pos) => {
-            let end_pos = asan_start_pos+asan_end_pos+asan_start_marker.len()+asan_raw_headline.as_str().len();
-            &triage_result.child.stderr[asan_start_pos..end_pos]
-        }
-        None => "",
-    };
+    let asan_body =
+        match &triage_result.child.stderr[asan_raw_headline.end()..].find(asan_start_marker) {
+            Some(asan_end_pos) => {
+                let end_pos = asan_start_pos
+                    + asan_end_pos
+                    + asan_start_marker.len()
+                    + asan_raw_headline.as_str().len();
+                &triage_result.child.stderr[asan_start_pos..end_pos]
+            }
+            None => "",
+        };
 
     let stop_reason = asan_headline.name("reason").unwrap().as_str().to_string();
 
     // Try and find the frame where ASAN was triggered from
     // That way we can print a better info message
-    let asan_first_frame: u64 = match R_ASAN_FIRST_FRAME.captures(&asan_body) {
+    let asan_first_frame: u64 = match R_ASAN_FIRST_FRAME.captures(asan_body) {
         Some(frame) => {
-            u64::from_str_radix(&frame.name("frame").unwrap().as_str()[2..], 16).unwrap()
+            u64::from_str_radix(&(frame.name("frame").unwrap().as_str())[2..], 16).unwrap()
         }
-        None => 0
+        None => 0,
     };
 
     let operation: &str = match asan_headline.name("operation") {
         Some(op) => {
-            if stop_reason != "SEGV" {
-                op.as_str()
-            } else {
+            if stop_reason == "SEGV" {
                 ""
+            } else {
+                op.as_str()
             }
         }
         _ => "",
@@ -89,7 +89,7 @@ fn asan_post_process(triage_result: &GdbTriageResult) -> Option<AsanInfo> {
         stop_reason,
         operation: operation.to_string(),
         first_frame: asan_first_frame,
-        body: asan_body.to_string()
+        body: asan_body.to_string(),
     })
 }
 
@@ -112,7 +112,7 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
 
     if frames.is_empty() {
         // TODO: warning of empty backtrace
-        return report
+        return report;
     }
 
     let first_frame = frames.get(0).unwrap();
@@ -126,10 +126,10 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
             // search the backtrace for a closely matching frame
             // note that ASAN backtrace addresses and GDB addresses can be off-by-one, hence
             // the ranged check
-            for (i, fr) in frames.iter().enumerate() {
-                if (fr.address+1) >= asan.first_frame && (fr.address-1) <= asan.first_frame {
+            for (_, fr) in frames.iter().enumerate() {
+                if (fr.address + 1) >= asan.first_frame && (fr.address - 1) <= asan.first_frame {
                     asan_frame = Some(fr);
-                    break
+                    break;
                 }
             }
 
@@ -139,51 +139,52 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
     };
 
     report.crashing_function = match &first_interesting_frame.symbol {
-        Some(symbol) => format!("{}", symbol.format()),
+        Some(symbol) => symbol.format(),
         // TODO: align to word size, not 8
         None => format!("0x{:<08x}", first_interesting_frame.address),
     };
 
     let stop_info = &ctx_info.stop_info;
-    let signal_info = format!("{} (si_signo={})", stop_info.signal, stop_info.signal_number);
-    let signal_code_info = format!("{} (si_code={})",
-
-    si_code_to_string(&stop_info.signal, stop_info.signal_code as i8), stop_info.signal_code);
+    let signal_info = format!(
+        "{} (si_signo={})",
+        stop_info.signal, stop_info.signal_number
+    );
+    let signal_code_info = format!(
+        "{} (si_code={})",
+        si_code_to_string(&stop_info.signal, stop_info.signal_code as i8),
+        stop_info.signal_code
+    );
 
     match &asan {
         Some(asan) => {
             let op = if asan.operation.is_empty() {
-                report.terse_headline = format!("ASAN_{}_{}",
-                    asan.stop_reason, report.crashing_function);
+                report.terse_headline =
+                    format!("ASAN_{}_{}", asan.stop_reason, report.crashing_function);
 
                 "".to_string()
             } else {
-                report.terse_headline = format!("ASAN_{}_{}_{}",
-                    asan.stop_reason, asan.operation, report.crashing_function);
+                report.terse_headline = format!(
+                    "ASAN_{}_{}_{}",
+                    asan.stop_reason, asan.operation, report.crashing_function
+                );
 
                 format!(" after a {}", asan.operation)
             };
 
-            report.headline = format!("ASAN detected {} in {}{} leading to {} / {}",
-                asan.stop_reason,
-                report.crashing_function,
-                op,
-                signal_info,
-                signal_code_info,
+            report.headline = format!(
+                "ASAN detected {} in {}{} leading to {} / {}",
+                asan.stop_reason, report.crashing_function, op, signal_info, signal_code_info,
             );
-
         }
         None => {
             let fault_address = match &stop_info.faulting_address {
                 Some(addr) => format!(" due to a fault at or near 0x{:<08x}", addr),
-                None => "".to_string()
+                None => "".to_string(),
             };
 
-            report.headline = format!("Program received {} / {} in {}{}",
-                signal_info,
-                signal_code_info,
-                report.crashing_function,
-                fault_address
+            report.headline = format!(
+                "Program received {} / {} in {}{}",
+                signal_info, signal_code_info, report.crashing_function, fault_address
             );
 
             report.terse_headline = format!("{}_{}", stop_info.signal, report.crashing_function);
@@ -204,14 +205,19 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
         }
 
         for reg in registers {
-            let regvpad = reg.size*2;
-            report.register_info += &format!("{:>regpad$} - 0x{:0>regvpad$x} ({})\n",
-                reg.name, reg.value, reg.pretty_value, regpad=regpad, regvpad=regvpad as usize);
+            let reg_hexpad = reg.size * 2;
+            report.register_info += &format!(
+                "{:>regpad$} - 0x{:0>reg_hexpad$x} ({})\n",
+                reg.name,
+                reg.value,
+                reg.pretty_value,
+                regpad = regpad,
+                reg_hexpad = reg_hexpad as usize
+            );
         }
     }
 
     if let Some(insn) = &primary_thread.current_instruction {
-
         if let Some(registers) = &primary_thread.registers {
             let mut regs_seen = HashSet::new();
 
@@ -220,7 +226,7 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
                     if ident.as_str() == reg.name {
                         regs_seen.insert(reg);
                         //report.crash_context += &format!("{} = 0x{:<08x}\n", reg.name, reg.value);
-                        break
+                        break;
                     }
                 }
             }
@@ -231,13 +237,22 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
             }
 
             for reg in &regs_seen {
-                let regvpad = reg.size*2;
-                report.crash_context += &format!("/* Register reference: {:>regpad$} - 0x{:0>regvpad$x} ({}) */\n",
-                    reg.name, reg.value, reg.pretty_value, regpad=regpad, regvpad=regvpad as usize);
+                let reg_hexpad = reg.size * 2;
+                report.crash_context += &format!(
+                    "/* Register reference: {:>regpad$} - 0x{:0>reg_hexpad$x} ({}) */\n",
+                    reg.name,
+                    reg.value,
+                    reg.pretty_value,
+                    regpad = regpad,
+                    reg_hexpad = reg_hexpad as usize
+                );
             }
         }
 
-        report.crash_context += &format!("Execution stopped here ==> 0x{:<08x}: {}\n", first_frame.address, insn);
+        report.crash_context += &format!(
+            "Execution stopped here ==> 0x{:<08x}: {}\n",
+            first_frame.address, insn
+        );
     }
 
     for (i, fr) in frames.iter().enumerate() {
@@ -251,7 +266,7 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
         };
 
         // if we have a file symbol with a line, use it for hashing
-        if !file_sym.is_empty() && file_sym.contains(":") {
+        if !file_sym.is_empty() && file_sym.contains(':') {
             major_hash.consume(file_sym.as_bytes());
         } else if fr.module != "[stack]" && fr.module != "[heap]" {
             // don't consider the stack or heap for hashing
@@ -260,113 +275,118 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
 
         match &fr.symbol {
             Some(symbol) => {
-                backtrace += &format!("{} in {} ({})\n",
-                    frame_header, symbol.format(), fr.module);
+                backtrace += &format!("{} in {} ({})\n", frame_header, symbol.format(), fr.module);
             }
             _ => {
                 backtrace += &format!("{} in {}\n", frame_header, fr.module);
             }
         }
 
-        match &fr.symbol {
-            Some(symbol) => {
-                let mut ctx = vec![];
+        if let Some(symbol) = &fr.symbol {
+            let mut ctx = vec![];
 
-                match &symbol.callsite {
-                    Some(callsite) => {
-                        let lineno = format!("{}", symbol.line.unwrap());
-                        let mut pad = lineno.len();
+            match &symbol.callsite {
+                Some(callsite) => {
+                    let lineno = format!("{}", symbol.line.unwrap());
+                    let mut pad = lineno.len();
 
-                        match symbol.function_line {
-                            Some(line) => {
-                                let lineno = format!("{}", line);
-                                pad = cmp::max(lineno.len(), pad);
-                                ctx.push(format!("{:>pad$}: {} {{",
-                                        lineno, symbol.format_function_prototype(), pad=pad));
-                            }
-                            None => ctx.push(format!("{:?<pad$}: {} {{",
-                                        "", symbol.format_function_prototype(), pad=pad)),
+                    match symbol.function_line {
+                        Some(line) => {
+                            let lineno = format!("{}", line);
+                            pad = cmp::max(lineno.len(), pad);
+                            ctx.push(format!(
+                                "{:>pad$}: {} {{",
+                                lineno,
+                                symbol.format_function_prototype(),
+                                pad = pad
+                            ));
+                        }
+                        None => ctx.push(format!(
+                            "{:?<pad$}: {} {{",
+                            "",
+                            symbol.format_function_prototype(),
+                            pad = pad
+                        )),
+                    }
+
+                    if let Some(locals) = &symbol.locals {
+                        let mut locals_left = HashSet::new();
+
+                        for local in locals {
+                            locals_left.insert(local);
                         }
 
-                        match &symbol.locals {
-                            Some(locals) => {
-                                let mut locals_left = HashSet::new();
+                        for code in callsite {
+                            if locals_left.is_empty() {
+                                break;
+                            }
 
-                                for local in locals {
-                                    locals_left.insert(local);
-                                }
+                            for local in locals_left.clone() {
+                                // search for all C-like identifiers and compare them
+                                // hacky but avoids false positives when checking
+                                // locals with single character names
+                                for ident in R_CIDENT.find_iter(code) {
+                                    if ident.as_str() == local.name {
+                                        locals_left.remove(local);
 
-                                for code in callsite {
-                                    if locals_left.is_empty() {
-                                        break
+                                        ctx.push(format!(
+                                            "{:|<pad$}: /* Local reference: {} */",
+                                            "",
+                                            elide_size(&local.format_decl(), 200),
+                                            pad = pad
+                                        ));
+                                        break;
                                     }
-
-                                    for local in locals_left.clone() {
-                                        // search for all C-like identifiers and compare them
-                                        // hacky but avoids false positives when checking
-                                        // locals with single character names
-                                        for ident in R_CIDENT.find_iter(code) {
-                                            if ident.as_str() == local.name {
-                                                locals_left.remove(local);
-
-                                                ctx.push(format!("{:|<pad$}: /* Local reference: {} */", "",
-                                                        elide_size(&local.format_decl(), 200), pad=pad));
-                                                break
-                                            }
-                                        }
-                                    }
                                 }
                             }
-                            _ => ()
-                        }
-
-                        // see if first line of crash context is less than or equal to function start
-                        let first_line = (symbol.line.unwrap() as usize)-callsite.len()+1;
-
-                        if first_line > ((symbol.function_line.unwrap_or(0)+1) as usize) {
-                            ctx.push(format!("{:|<pad$}:", "", pad=pad));
-                        }
-
-                        for (i, code) in callsite.iter().enumerate() {
-                            let lineno = (symbol.line.unwrap() as usize)-callsite.len()+i+1;
-
-                            if lineno <= (symbol.function_line.unwrap_or(0) as usize) {
-                                continue
-                            }
-
-                            // context always comes before the line
-                            ctx.push(format!("{:>pad$}: {}", lineno, code, pad=pad));
-                        }
-
-                        ctx.push(format!("{:|<pad$}:", "", pad=pad));
-                        ctx.push(format!("{:-<pad$}: }}", "", pad=pad));
-                    }
-                    None =>  {
-                        // we likely only have the function name, but this is printed
-                        // before. don't double print
-                        if !ctx.is_empty() {
-                            ctx.push(format!("{}", symbol.format_function_prototype()));
                         }
                     }
-                };
 
-                if !file_sym.is_empty() {
-                    ctx.push(format!("at {}", file_sym));
+                    // see if first line of crash context is less than or equal to function start
+                    let first_line = (symbol.line.unwrap() as usize) - callsite.len() + 1;
+
+                    if first_line > ((symbol.function_line.unwrap_or(0) + 1) as usize) {
+                        ctx.push(format!("{:|<pad$}:", "", pad = pad));
+                    }
+
+                    for (i, code) in callsite.iter().enumerate() {
+                        let lineno = (symbol.line.unwrap() as usize) - callsite.len() + i + 1;
+
+                        if lineno <= (symbol.function_line.unwrap_or(0) as usize) {
+                            continue;
+                        }
+
+                        // context always comes before the line
+                        ctx.push(format!("{:>pad$}: {}", lineno, code, pad = pad));
+                    }
+
+                    ctx.push(format!("{:|<pad$}:", "", pad = pad));
+                    ctx.push(format!("{:-<pad$}: }}", "", pad = pad));
                 }
-
-                if !ctx.is_empty() {
-                    for line in ctx {
-                        backtrace += &format!("{:pad$}", "", pad=frame_pad);
-                        backtrace += &format!("{}\n", line);
+                None => {
+                    // we likely only have the function name, but this is printed
+                    // before. don't double print
+                    if !ctx.is_empty() {
+                        ctx.push(symbol.format_function_prototype());
                     }
-                    backtrace += &format!("\n");
                 }
+            };
+
+            if !file_sym.is_empty() {
+                ctx.push(format!("at {}", file_sym));
             }
-            _ => ()
+
+            if !ctx.is_empty() {
+                for line in ctx {
+                    backtrace += &format!("{:pad$}", "", pad = frame_pad);
+                    backtrace += &format!("{}\n", line);
+                }
+                backtrace += &String::from('\n');
+            }
         }
     }
 
-    report.stackhash = String::from(format!("{:x}", major_hash.compute()));
+    report.stackhash = format!("{:x}", major_hash.compute());
     report.backtrace = backtrace;
 
     report
