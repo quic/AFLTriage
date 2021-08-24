@@ -15,7 +15,7 @@ Example:
 
 ```
 $ afltriage -i fuzzing_directory -o reports ./target_binary --option-one @@
-AFLTriage v0.1.2
+AFLTriage v0.1.5
 
 [+] GDB is working (GNU gdb (Ubuntu 8.1.1-0ubuntu1) 8.1.1 - Python 3.6.9 (default, Jan 26 2021, 15:33:00))
 [+] Using ASAN_SYMBOLIZER_PATH="/usr/bin/addr2line"
@@ -55,28 +55,53 @@ cargo run -- -i afl_output_dir/ ./path_to_binary --binary args
 Here is the extended usage statement for reference:
 
 ```
-afltriage 0.1.2
-Quickly triage and summarize crashing testcases
+afltriage 0.1.5
+Quickly triage and summarize crashing testcases from AFL
 
 USAGE:
     afltriage -i <input>... -o <output> <command>...
 
-FLAGS:
-        --child-output    Include child output in triage reports.
-        --debug           Enable low-level debugging of triage operations.
-        --dry-run         Perform sanity checks and describe the inputs to be triaged.
-    -h, --help            Prints help information
-    -V, --version         Prints version information
-
 OPTIONS:
-    -i <input>...                 A path to a single testcase, directory of testcases, AFL directory, and/or directory
-                                  of AFL directories to be triaged.
-    -j <jobs>                     How many threads to use during triage.
-        --output-format <ofmt>    The triage report output format. [default: text]  [possible values: text, markdown,
-                                  json]
-    -o <output>                   The output path for triage report files. Use '-' to print to console.
+        --child-output                               
+            Include child output in triage reports.
+
+        --child-output-lines <child_output_lines>
+            How many lines of program output from the target to include in reports. Use 0 to mean unlimited lines (not
+            recommended). [default: 25]
+        --debug                                      
+            Enable low-level debugging of triage operations.
+
+        --dry-run                                    
+            Perform sanity checks and describe the inputs to be triaged.
+
+    -h, --help                                       
+            Prints help information
+
+    -i <input>...
+            A list of paths to a testcase, directory of testcases, AFL directory, and/or directory of AFL directories to
+            be triaged. Note that this arg takes multiple inputs in a row (e.g. -i input1 input2...) so it cannot be the
+            last argument passed to AFLTriage -- this is reserved for the command.
+    -j <jobs>                                        
+            How many threads to use during triage.
+
+        --output-format <ofmt>
+            The triage report output format. [default: text]  [possible values: text, markdown, json]
+
+    -o <output>
+            The output path for triage report files. Use '-' to print to console.
+
+        --stdin                                      
+            Provide testcase input to the target via stdin instead of a file.
+
+    -t, --timeout <timeout>
+            The timeout in milliseconds for each testcase to triage. [default: 60000]
+
+    -V, --version                                    
+            Prints version information
+
 
 ARGS:
-    <command>...    The binary executable and args to execute. Use '@@' as a placeholder for the path to the input
-                    file.
+    <command>...    
+            The binary executable and args to execute. Use '@@' as a placeholder for the path to the input file or
+            --stdin. Optionally use -- to delimit the start of the command.
 ```

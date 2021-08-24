@@ -364,7 +364,7 @@ impl GdbTriager {
         };
 
         // TODO: memory limit?
-        #[rustfmt_skip]
+        #[rustfmt::rustfmt_skip]
         let gdb_args = vec_of_strings!(
             "--batch", "--nx",
             "-iex", "set index-cache on",
