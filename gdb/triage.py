@@ -5,6 +5,7 @@
 # GDB Triage to JSON Script
 # by Grant Hernandez
 import sys
+import os
 
 try:
     import gdb
@@ -206,6 +207,10 @@ def get_code_context(location, filename):
 
         line = lines[1]
     else:
+        # GDB 8.1.1 has a strange bug where looking up missing files with "../" in them causes a big delay
+        # EX: /usr/lib/gcc/x86_64-linux-gnu/5.4.0/../../../../include/c++/5.4.0/bits/basic_string.tcc:221
+        filename_norm = os.path.normpath(filename)
+        location = location.replace(filename, filename_norm)
         lines = gdb.execute("list %s" % (location), to_string=True).splitlines()
 
         if len(lines) < 1:
