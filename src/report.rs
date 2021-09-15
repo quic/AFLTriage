@@ -183,8 +183,8 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
             };
 
             report.headline = format!(
-                "Program received {} / {} in {}{}",
-                signal_info, signal_code_info, report.crashing_function, fault_address
+                "CRASH detected in {}{} leading to {} / {} ",
+                report.crashing_function, fault_address, signal_info, signal_code_info,
             );
 
             report.terse_headline = format!("{}_{}", stop_info.signal, report.crashing_function);

@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 #[macro_use]
 extern crate lazy_static;
@@ -42,10 +43,6 @@ arg_enum! {
     }
 }
 
-fn isatty() -> bool {
-    unsafe { libc::isatty(libc::STDOUT_FILENO) != 0 }
-}
-
 fn setup_command_line() -> ArgMatches<'static> {
     let mut app = App::new("afltriage")
                           .version(crate_version!())
@@ -66,10 +63,15 @@ fn setup_command_line() -> ArgMatches<'static> {
                                      and/or directory of AFL directories to be triaged. Note that this arg \
                                      takes multiple inputs in a row (e.g. -i input1 input2...) so it cannot be the last \
                                      argument passed to AFLTriage -- this is reserved for the command."))
-                          .arg(Arg::with_name("dryrun")
-                               .long("--dry-run")
+                          .arg(Arg::with_name("profile_only")
+                               .long("--profile-only")
                                .takes_value(false)
-                               .help("Perform sanity checks and describe the inputs to be triaged."))
+                               .help("Perform environment checks, describe the inputs to be triaged, and profile the target binary."))
+                          .arg(Arg::with_name("skip_profile")
+                               .long("--skip-profile")
+                               .takes_value(false)
+                               .conflicts_with("profile_only")
+                               .help("Skip target profiling before input processing."))
                           .arg(Arg::with_name("output")
                                .short("-o")
                                .takes_value(true)
@@ -138,7 +140,88 @@ enum TriageResult {
     Timedout,
 }
 
-fn process_test_case(
+struct ProfileResult {
+    process_result: std::io::Result<ChildResult>,
+    process_execution_time: Duration,
+    process_rss: usize,
+    triage_result: TriageResult,
+    debugger_execution_time: Duration,
+    debugger_rss: usize,
+    debug_mem_overhead: f32,
+    debug_time_overhead: f32,
+}
+
+fn profile_target(
+    gdb: &GdbTriager,
+    binary_args: &[&str],
+    testcase: &str,
+    debug: bool,
+    input_stdin: bool,
+    timeout_ms: u64,
+) -> std::io::Result<ProfileResult> {
+    log::info!("Profiling target...");
+
+    let prog_args = expand_filepath_templates(binary_args, testcase);
+
+    let input_file = if input_stdin {
+        Some(util::read_file_to_bytes(testcase)?)
+    } else {
+        None
+    };
+
+    let start = Instant::now();
+    let before_rss = util::get_peak_rss();
+    let process_result = process::execute_capture_output_timeout(&prog_args[0], &prog_args[1..], timeout_ms, input_file);
+    let process_execution_time = start.elapsed();
+    let after_process_rss = util::get_peak_rss();
+    let process_rss = std::cmp::max(after_process_rss - before_rss, 1); // round up to 1kb
+
+    log::info!("Target profile: time={:?}, mem={}KB",
+        process_execution_time, process_rss);
+
+    let start = Instant::now();
+    let triage_result = triage_test_case(gdb, binary_args, testcase, debug, input_stdin, timeout_ms);
+    let debugger_execution_time = start.elapsed();
+    let after_debugger_rss = util::get_peak_rss();
+
+    let debugger_rss = std::cmp::max(after_debugger_rss - after_process_rss, 1);
+
+    let debug_time_overhead = (debugger_execution_time.as_millis() as f32) /
+        (process_execution_time.as_millis() as f32);
+
+    let debug_mem_overhead = (debugger_rss as f32) /
+        (process_rss as f32);
+
+    log::info!("Debugged profile: t={:?} ({:.2}x), mem={}KB ({:.2}x)",
+        debugger_execution_time, debug_time_overhead, debugger_rss, debug_mem_overhead);
+
+    Ok(ProfileResult {
+        process_result,
+        process_execution_time,
+        process_rss,
+        triage_result,
+        debugger_execution_time,
+        debugger_rss,
+        debug_mem_overhead,
+        debug_time_overhead,
+    })
+}
+
+fn expand_filepath_templates(args: &[&str], value: &str) -> Vec<String> {
+    let mut expanded_args: Vec<String> = Vec::new();
+
+    for arg in args.iter() {
+        if *arg == "@@" {
+            expanded_args.push(value.to_string());
+        } else {
+            expanded_args.push((*arg).to_string());
+        }
+    }
+
+    expanded_args
+}
+
+fn triage_test_case(
     gdb: &GdbTriager,
     binary_args: &[&str],
     testcase: &str,
@@ -146,15 +229,7 @@ fn process_test_case(
     input_stdin: bool,
     timeout_ms: u64,
 ) -> TriageResult {
-    let mut prog_args: Vec<String> = Vec::new();
-
-    for arg in binary_args.iter() {
-        if *arg == "@@" {
-            prog_args.push(testcase.to_string());
-        } else {
-            prog_args.push((*arg).to_string());
-        }
-    }
+    let prog_args = expand_filepath_templates(binary_args, testcase);
 
     // Whether to pass a file in via GDB stdin
     let input_file = if input_stdin { Some(testcase) } else { None };
@@ -428,6 +503,10 @@ fn init_logger() {
 }
 
 fn main() {
+    std::process::exit(main_wrapper());
+}
+
+fn main_wrapper() -> i32 {
     /* AFLTriage Flow
      *
      * 1. Environment sanity check: gdb python, binary exists
@@ -451,7 +530,7 @@ fn main() {
     let gdb: GdbTriager = GdbTriager::new();
 
     if !sanity_check(&gdb, &binary_args) {
-        return;
+        return 1;
     }
 
     let input_stdin = args.is_present("stdin");
@@ -463,11 +542,12 @@ fn main() {
         if has_atat {
             log::warn!("Image triage args contains @@ but you are using --stdin");
         }
-    }
+    } else {
 
-    if !has_atat {
-        log::error!("Image triage args missing file placeholder: @@. If you'd like to pass input to the child via stdin, use the --stdin option.");
-        return;
+        if !has_atat {
+            log::error!("Image triage args missing file placeholder: @@. If you'd like to pass input to the child via stdin, use the --stdin option.");
+            return 1;
+        }
     }
 
     let binary_cmdline = binary_args.join(" ");
@@ -485,7 +565,7 @@ fn main() {
         if let Err(e) = std::fs::create_dir(&d) {
             if e.kind() != std::io::ErrorKind::AlreadyExists {
                 log::error!("Error creating output directory: {}", e);
-                return;
+                return 1;
             }
         }
 
@@ -516,15 +596,8 @@ fn main() {
 
     if all_testcases.is_empty() {
         log::error!("No testcases found!");
-        return;
+        return 1;
     }
-
-    if args.is_present("dryrun") {
-        log::error!("Exiting due to dry run");
-        return;
-    }
-
-    log::info!("Triaging {} testcases", all_testcases.len());
 
     let debug = args.is_present("debug");
     let child_output = args.is_present("child_output");
@@ -533,20 +606,86 @@ fn main() {
         n
     } else {
         log::error!("Child output lines parse error");
-        return;
+        return 1;
     };
 
     let timeout_ms = value_t!(args, "timeout", u64).unwrap_or_else(|_| 60000);
 
-    if timeout_ms < 1000 {
+    if timeout_ms < 100 {
         log::warn!("Requested timeout of {}ms is dangerously low!", timeout_ms);
     } else {
         log::info!("Triage timeout set to {}ms", timeout_ms);
     }
 
-    let requested_job_count = value_t!(args, "jobs", usize).unwrap_or_else(|_| num_cpus::get() / 2);
+    let mut max_recommended_threadcount = num_cpus::get();
+
+    if !args.is_present("skip_profile") {
+        let first_testcase_path = all_testcases[0].path.to_str().unwrap();
+        let profile_result = profile_target(&gdb, &binary_args, first_testcase_path, debug, input_stdin, timeout_ms);
+
+        if let Ok(profile_result) = profile_result {
+            if let std::io::Result::Err(e) = profile_result.process_result {
+                if e.kind() == std::io::ErrorKind::TimedOut {
+                    log::warn!("Target process timed out during profiling! Consider raising the timeout")
+                } else {
+                    log::error!("Target process errored during profiling: {}", e);
+                    log::error!("It's unlikely that triage will succeed - exiting...");
+                    return 1;
+                }
+            }
+
+            match profile_result.triage_result {
+                TriageResult::Timedout => {
+                    log::warn!("The triage process timed out during profiling! The debugger needs to load and process symbols, which increases execution time. Consider raising the timeout")
+                },
+                TriageResult::Error(err) => {
+                    log::error!("The triage errored during profiling (enable --debug for more information): {}", err.to_string());
+                    log::error!("It's unlikely that triage will succeed - exiting...");
+                    return 1;
+                }
+                _ => (),
+            }
+
+            if let Some(memkb) = util::read_available_memory() {
+                log::info!("System memory available: {} KB", memkb);
+                log::info!("System cores available: {}", max_recommended_threadcount);
+                let new_thread_count = (memkb as usize) / profile_result.debugger_rss;
+
+                if new_thread_count < max_recommended_threadcount {
+                    log::warn!("The target is memory hungry - reducing threadcount from {} to {}",
+                        max_recommended_threadcount, new_thread_count);
+                    max_recommended_threadcount = new_thread_count;
+                }
+
+            } else {
+                log::warn!("Unable to determine available system memory");
+            }
+        } else {
+            log::error!("Failed to read profile input testcase");
+            return 1;
+        }
+    }
+
+    if args.is_present("profile_only") {
+        log::info!("Exiting due to --profile-only");
+        return 0;
+    }
+
+    let requested_job_count = if let Ok(v) = value_t!(args, "jobs", usize) {
+        if v > max_recommended_threadcount {
+            log::warn!("Requested thread count of {} may exceed system resources", v);
+        }
+        v
+    } else {
+        max_recommended_threadcount
+    };
+
+    // No point in having more threads than testcases...
     let job_count = std::cmp::max(1, std::cmp::min(requested_job_count, all_testcases.len()));
 
+    //////////////////
+
+    log::info!("Triaging {} testcases", all_testcases.len());
     log::info!("Using {} threads to triage", job_count);
 
     rayon::ThreadPoolBuilder::new()
@@ -556,7 +695,7 @@ fn main() {
 
     let pb = ProgressBar::new((&all_testcases).len() as u64);
 
-    let display_progress = isatty() && output_dir.is_some() && !debug;
+    let display_progress = util::isatty() && output_dir.is_some() && !debug;
 
     if display_progress {
         pb.set_style(ProgressStyle::default_bar()
@@ -565,13 +704,21 @@ fn main() {
         pb.enable_steady_tick(200);
     }
 
-    let write_message: Box<dyn Fn(String) + Sync> = if display_progress {
-        Box::new(|msg| pb.set_message(&msg))
+    let write_message: Box<dyn Fn(String, Option<&str>) + Sync> = if display_progress {
+        Box::new(|msg, tc| {
+            pb.set_message(&msg)
+        })
     } else {
-        Box::new(|msg| log::info!("{}", msg))
+        Box::new(|msg, tc| {
+            if let Some(tc_name) = tc {
+                log::info!("{}: {}", tc_name, msg)
+            } else {
+                log::info!("{}", msg)
+            }
+        })
     };
 
-    write_message(format!("Processing initial {} test cases", job_count));
+    write_message(format!("Processing initial {} test cases", job_count), None);
 
     let state = Arc::new(Mutex::new(TriageState {
         crashed: 0,
@@ -582,9 +729,9 @@ fn main() {
         unique_errors: HashMap::new(),
     }));
 
-    all_testcases.par_iter().for_each(|testcase| {
+    all_testcases.par_iter().panic_fuse().for_each(|testcase| {
         let path = testcase.path.to_str().unwrap();
-        let result = process_test_case(&gdb, &binary_args, path, debug, input_stdin, timeout_ms);
+        let result = triage_test_case(&gdb, &binary_args, path, debug, input_stdin, timeout_ms);
 
         let report = match &result {
             TriageResult::Crash(triage) => Some(report::format_text_report(triage)),
@@ -595,30 +742,30 @@ fn main() {
         let mut state = state.lock().unwrap();
 
         // TODO: display child-output even without a crash to help debug triage errors
-        /*if child_output {
-            println!("\nChild STDOUT:\n{}\n\nChild STDERR:\n{}\n",
-                child.stdout, child.stderr);
-        }*/
 
         match result {
             TriageResult::NoCrash(_child) => {
                 state.no_crash += 1;
 
-                //write_message("No crash".into());
+                if !display_progress {
+                    write_message("No crash".into(), Some(path));
+                }
             }
             TriageResult::Timedout => {
                 state.timedout += 1;
 
-                //write_message("No crash".into());
+                if !display_progress {
+                    write_message("Timed out".into(), Some(path));
+                }
             }
             TriageResult::Crash(triage) => {
                 let report = report.as_ref().unwrap();
 
                 state.crashed += 1;
 
-                write_message(format!("CRASH: {}", report.headline));
-
                 if !state.crash_signature.contains(&report.stackhash) {
+                    write_message(format!("{}", report.headline), Some(path));
+
                     state.crash_signature.insert(report.stackhash.to_string());
 
                     let mut text_report = format!(
@@ -674,7 +821,7 @@ fn main() {
                         write_message(format!(
                             "--- REPORT BEGIN ---\n{}\n--- REPORT END ---",
                             text_report,
-                        ));
+                        ), None);
                     } else {
                         let output_dir = output_dir.as_ref().unwrap();
                         let report_filename = format!(
@@ -688,15 +835,17 @@ fn main() {
                         {
                             // TODO: notify / exit early
                             let failed_to_write = format!("Failed to write report: {}", e);
-                            write_message(failed_to_write);
+                            write_message(failed_to_write, Some(path));
                         }
                     }
+                } else {
+                    write_message(format!("{}", report.headline), Some(path));
                 }
             }
             TriageResult::Error(gdb_error) => {
                 state.errored += 1;
 
-                write_message(format!("ERROR: {}", gdb_error.error));
+                write_message(format!("ERROR: {}", gdb_error.error), Some(path));
 
                 if let Some(x) = state.unique_errors.get_mut(&gdb_error) {
                     *x += 1;
@@ -730,7 +879,6 @@ fn main() {
     );
 
     if state.errored == total {
-        // TODO: handle timeout/memory limit different vs. internal errors
         log::error!("Something seems to be wrong during triage as all testcases errored.");
     }
 
@@ -742,28 +890,8 @@ fn main() {
         );
 
         for (err, times) in &state.unique_errors {
-            let times = format!("(seen {} time(s))", times);
-
-            let msg: String = if err.details.is_empty() {
-                format!("{} {}", err.error, times)
-            } else if err.details.len() == 1 {
-                format!(
-                    "{}: {} {}",
-                    err.error,
-                    err.details.get(0).unwrap().trim_end(),
-                    times
-                )
-            } else {
-                let mut msg = format!("{} {}\n", err.error, times);
-
-                for (i, line) in err.details.iter().enumerate() {
-                    msg += &format!("{}: {}\n", i + 1, line.trim_end());
-                }
-
-                msg
-            };
-
-            log::error!("Triage error: {}", msg);
+            let times = format!(" (seen {} time(s))", times);
+            log::error!("Triage error {}: {}", times, err.to_string());
         }
     }
 
@@ -772,6 +900,8 @@ fn main() {
     }
 
     if state.timedout == total {
-        log::warn!("All of the testcases timed out! Try increasing the timeout (GDB symbol loading can increase triage time) and double check you are using the right command line.");
+        log::warn!("All of the testcases timed out! Try increasing the timeout (debugger symbol loading can increase triage time) and double check you are using the right command line.");
     }
+
+    return 0;
 }

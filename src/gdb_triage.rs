@@ -202,6 +202,26 @@ impl GdbTriageError {
             details,
         }
     }
+
+    pub fn to_string(&self) -> String {
+        if self.details.is_empty() {
+            format!("{}", self.error)
+        } else if self.details.len() == 1 {
+            format!(
+                "{}: {}",
+                self.error,
+                self.details.get(0).unwrap().trim_end(),
+            )
+        } else {
+            let mut msg = format!("{}\n", self.error);
+
+            for (i, line) in self.details.iter().enumerate() {
+                msg += &format!("{}: {}\n", i + 1, line.trim_end());
+            }
+
+            msg
+        }
+    }
 }
 
 macro_rules! vec_of_strings {
