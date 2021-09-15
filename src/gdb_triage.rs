@@ -390,8 +390,9 @@ impl GdbTriager {
             .concat()
             .join(" ");
 
+        // Never pass stdin to GDB as it can pass testcases to the target using "run < FILE"
         let output =
-            match process::execute_capture_output_timeout(&self.gdb, gdb_cmdline, timeout_ms) {
+            match process::execute_capture_output_timeout(&self.gdb, gdb_cmdline, timeout_ms, None) {
                 Ok(o) => o,
                 Err(e) => {
                     return if e.kind() == ErrorKind::TimedOut {

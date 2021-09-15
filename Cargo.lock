@@ -10,6 +10,7 @@ dependencies = [
  "async-process",
  "clap",
  "env_logger",
+ "futures-lite",
  "indicatif",
  "is_executable",
  "lazy_static",
