@@ -1,0 +1,12 @@
+ASAN:DEADLYSIGNAL
+=================================================================
+==32232==ERROR: AddressSanitizer: SEGV on unknown address 0x00009bd537dd (pc 0x561010d1d83c bp 0x7ffe845ab640 sp 0x7ffe845ab630 T0)
+==32232==The signal is caused by a READ memory access.
+    #0 0x561010d1d83b in crash_segv /tmp/test.c:14
+    #1 0x561010d1d87a in main /tmp/test.c:20
+    #2 0x7fe505872bf6 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x21bf6)
+    #3 0x561010d1d719 in _start (/tmp/test+0x719)
+
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: SEGV /tmp/test.c:14 in crash_segv
+==32232==ABORTING

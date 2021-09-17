@@ -1,0 +1,11 @@
+ASAN:DEADLYSIGNAL
+=================================================================
+==22098==ERROR: AddressSanitizer: FPE on unknown address 0x560b425587b0 (pc 0x560b425587b0 bp 0x7ffeef463d50 sp 0x7ffeef463d50 T0)
+    #0 0x560b425587af in crash_fpe /tmp/test.c:8
+    #1 0x560b425587c6 in main /tmp/test.c:13
+    #2 0x7fa3dd270bf6 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x21bf6)
+    #3 0x560b425586b9 in _start (/tmp/test+0x6b9)
+
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: FPE /tmp/test.c:8 in crash_fpe
+==22098==ABORTING

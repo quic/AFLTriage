@@ -4,22 +4,13 @@
 use crate::gdb_triage::{GdbContextInfo, GdbTriageResult};
 use crate::platform::linux::si_code_to_string;
 use crate::util::elide_size;
+use super::sanitizer::*;
 use regex::Regex;
 use std::cmp;
 use std::collections::HashSet;
 
 lazy_static! {
     static ref R_CIDENT: Regex = Regex::new(r#"[_a-zA-Z][_a-zA-Z0-9]{0,30}"#).unwrap();
-    static ref R_ASAN_HEADLINE: Regex = Regex::new(
-        r#"(?x)
-        ([=]+[\r\n]+)?
-        (?P<pid>=+[0-9]+=+)\s*ERROR:\s*AddressSanitizer:\s*
-        (attempting\s)?(?P<reason>[-_A-Za-z0-9]+)[^\r\n]+[\r\n]+
-        (?P<operation>[-_A-Za-z0-9]+)?
-        "#
-    )
-    .unwrap();
-    static ref R_ASAN_FIRST_FRAME: Regex = Regex::new(r#"#0\s+(?P<frame>0x[a-fA-F0-9]+)"#).unwrap();
 }
 
 pub struct CrashReport {
@@ -31,66 +22,6 @@ pub struct CrashReport {
     pub asan_body: String,
     pub register_info: String,
     pub stackhash: String,
-}
-
-struct AsanInfo {
-    stop_reason: String,
-    operation: String,
-    first_frame: u64,
-    body: String,
-}
-
-fn asan_post_process(triage_result: &GdbTriageResult) -> Option<AsanInfo> {
-    let asan_match = R_ASAN_HEADLINE.captures(&triage_result.child.stderr)?;
-
-    // cut out the ASAN body from the child's output
-    let asan_headline = asan_match;
-    let asan_start_marker = asan_headline.name("pid").unwrap().as_str();
-
-    // find the bounds of the ASAN print to capture it raw
-    let asan_raw_headline = asan_headline.get(0).unwrap();
-    let asan_start_pos = asan_raw_headline.start();
-
-    let asan_body =
-        match &triage_result.child.stderr[asan_raw_headline.end()..].find(asan_start_marker) {
-            Some(asan_end_pos) => {
-                let end_pos = asan_start_pos
-                    + asan_end_pos
-                    + asan_start_marker.len()
-                    + asan_raw_headline.as_str().len();
-                &triage_result.child.stderr[asan_start_pos..end_pos]
-            }
-            None => "",
-        };
-
-    let stop_reason = asan_headline.name("reason").unwrap().as_str().to_string();
-
-    // Try and find the frame where ASAN was triggered from
-    // That way we can print a better info message
-    let asan_first_frame: u64 = match R_ASAN_FIRST_FRAME.captures(asan_body) {
-        Some(frame) => {
-            u64::from_str_radix(&(frame.name("frame").unwrap().as_str())[2..], 16).unwrap()
-        }
-        None => 0,
-    };
-
-    let operation: &str = match asan_headline.name("operation") {
-        Some(op) => {
-            if stop_reason == "SEGV" {
-                ""
-            } else {
-                op.as_str()
-            }
-        }
-        _ => "",
-    };
-
-    Some(AsanInfo {
-        stop_reason,
-        operation: operation.to_string(),
-        first_frame: asan_first_frame,
-        body: asan_body.to_string(),
-    })
 }
 
 pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
@@ -117,7 +48,7 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
 
     let first_frame = frames.get(0).unwrap();
 
-    let asan = asan_post_process(triage_result);
+    let asan = asan_post_process(&triage_result.child.stdout);
 
     let first_interesting_frame = match &asan {
         Some(asan) => {

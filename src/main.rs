@@ -734,7 +734,7 @@ fn main_wrapper() -> i32 {
         let result = triage_test_case(&gdb, &binary_args, path, debug, input_stdin, timeout_ms);
 
         let report = match &result {
-            TriageResult::Crash(triage) => Some(report::format_text_report(triage)),
+            TriageResult::Crash(triage) => Some(report::text::format_text_report(triage)),
             _ => None,
         };
 
