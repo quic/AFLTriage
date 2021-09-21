@@ -1,0 +1,47 @@
+=================================================================
+==15387==ERROR: AddressSanitizer: global-buffer-overflow on address 0x561eeffce022 at pc 0x7f91702c0075 bp 0x7fff4c92fe50 sp 0x7fff4c92f5c8
+READ of size 3 at 0x561eeffce022 thread T0
+    #0 0x7f91702c0074  (/usr/lib/x86_64-linux-gnu/libasan.so.4+0x74074)
+    #1 0x7f917033554f  (/usr/lib/x86_64-linux-gnu/libasan.so.4+0xe954f)
+    #2 0x7f91702c01ed  (/usr/lib/x86_64-linux-gnu/libasan.so.4+0x741ed)
+    #3 0x7f91702c0dad in vprintf (/usr/lib/x86_64-linux-gnu/libasan.so.4+0x74dad)
+    #4 0x7f91702c0e9e in __interceptor_printf (/usr/lib/x86_64-linux-gnu/libasan.so.4+0x74e9e)
+    #5 0x561eefdccf4a in interceptor /tmp/test.c:26
+    #6 0x561eefdccf9f in main /tmp/test.c:35
+    #7 0x7f916fe7cbf6 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x21bf6)
+    #8 0x561eefdccbd9 in _start (/tmp/test+0xbd9)
+
+0x561eeffce022 is located 0 bytes to the right of global variable 'unterminated' defined in 'test.c:25:15' (0x561eeffce020) of size 2
+SUMMARY: AddressSanitizer: global-buffer-overflow (/usr/lib/x86_64-linux-gnu/libasan.so.4+0x74074)
+Shadow bytes around the buggy address:
+  0x0ac45dff1bb0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0ac45dff1bc0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0ac45dff1bd0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0ac45dff1be0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0ac45dff1bf0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x0ac45dff1c00: 00 00 00 00[02]f9 f9 f9 f9 f9 f9 f9 00 00 00 00
+  0x0ac45dff1c10: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0ac45dff1c20: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0ac45dff1c30: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0ac45dff1c40: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0ac45dff1c50: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==15387==ABORTING

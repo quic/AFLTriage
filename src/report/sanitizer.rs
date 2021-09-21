@@ -13,14 +13,14 @@ lazy_static! {
         "#
     )
     .unwrap();
-    static ref R_ASAN_FIRST_FRAME: Regex = Regex::new(r#"#0\s+(?P<frame>0x[a-fA-F0-9]+)"#).unwrap();
+    static ref R_ASAN_FRAME: Regex = Regex::new(r#"#(?P<num>[0-9]+)\s+(?P<addr>0x[a-fA-F0-9]+)"#).unwrap();
 }
 
 #[derive(Debug, PartialEq)]
 pub struct AsanInfo {
     pub stop_reason: String,
     pub operation: String,
-    pub first_frame: u64,
+    pub frames: Vec<u64>,
     pub body: String,
 }
 
@@ -46,7 +46,9 @@ pub fn asan_post_process(input: &str) -> Option<AsanInfo> {
     // In that case the only safe option is to eat the rest of the string
     // Sanitizers really need machine readable output
     let end_pos: usize = if let Some(pos_rel) = &input[next_pos..].find(asan_start_marker) {
-        pos_rel + next_pos + asan_start_marker.len()
+        let pos = pos_rel + next_pos;
+        let skip_len = &input[pos..].find("\n").unwrap_or(0);
+        pos + skip_len
     } else if let Some(pos_rel) = &input[next_pos..].find("SUMMARY: ") {
         let pos = pos_rel + next_pos;
         let skip_len = &input[pos..].find("\n").unwrap_or(0);
@@ -62,12 +64,18 @@ pub fn asan_post_process(input: &str) -> Option<AsanInfo> {
 
     // Try and find the frame where ASAN was triggered from
     // That way we can print a better info message
-    let asan_first_frame: u64 = match R_ASAN_FIRST_FRAME.captures(asan_body) {
-        Some(frame) => {
-            u64::from_str_radix(&(frame.name("frame").unwrap().as_str())[2..], 16).unwrap()
+    let mut asan_frames = Vec::new();
+
+    for (i, frame) in R_ASAN_FRAME.captures_iter(asan_body).enumerate() {
+        let id = u64::from_str_radix(&(frame.name("num").unwrap().as_str()), 10).unwrap();
+        let addr = u64::from_str_radix(&(frame.name("addr").unwrap().as_str())[2..], 16).unwrap();
+
+        if (i as u64) != id {
+            break
         }
-        None => 0,
-    };
+
+        asan_frames.push(addr);
+    }
 
     let operation: &str = match asan_headline.name("operation") {
         Some(op) => {
@@ -83,7 +91,7 @@ pub fn asan_post_process(input: &str) -> Option<AsanInfo> {
     Some(AsanInfo {
         stop_reason,
         operation: operation.to_string(),
-        first_frame: asan_first_frame,
+        frames: asan_frames,
         body: asan_body.trim_end().to_string(),
     })
 }
@@ -100,36 +108,37 @@ mod test {
 
         assert_eq!(r.stop_reason, "FPE");
         assert_eq!(r.operation, "");
-        assert_eq!(r.first_frame, 0x560b425587af);
+        assert_eq!(r.frames[0], 0x560b425587af);
 
         let a = String::from_utf8_lossy(include_bytes!("./sanitizer_reports/asan_segv.txt"));
         let r = asan_post_process(&a).unwrap();
 
         assert_eq!(r.stop_reason, "SEGV");
         assert_eq!(r.operation, "");
-        assert_eq!(r.first_frame, 0x561010d1d83b);
+        assert_eq!(r.frames[0], 0x561010d1d83b);
 
         let a = String::from_utf8_lossy(include_bytes!("./sanitizer_reports/asan_oob_read.txt"));
         let r = asan_post_process(&a).unwrap();
 
         assert_eq!(r.stop_reason, "stack-buffer-overflow");
         assert_eq!(r.operation, "READ");
-        assert_eq!(r.first_frame, 0x5561e001bba8);
+        assert_eq!(r.frames[0], 0x5561e001bba8);
+        assert_eq!(r.body, a.trim());
 
         let a = String::from_utf8_lossy(include_bytes!("./sanitizer_reports/asan_multi.txt"));
         let r = asan_post_process(&a).unwrap();
 
         assert_eq!(r.stop_reason, "SEGV");
         assert_eq!(r.operation, "");
-        assert_eq!(r.first_frame, 0x561010d1d83b);
-        assert!(r.body.ends_with("==32232=="));
+        assert_eq!(r.frames[0], 0x561010d1d83b);
+        assert!(r.body.ends_with("==32232==ABORTING"));
 
         let a = String::from_utf8_lossy(include_bytes!("./sanitizer_reports/asan_no_end.txt"));
         let r = asan_post_process(&a).unwrap();
 
         assert_eq!(r.stop_reason, "SEGV");
         assert_eq!(r.operation, "");
-        assert_eq!(r.first_frame, 0x561010d1d83b);
+        assert_eq!(r.frames[0], 0x561010d1d83b);
         assert!(r.body.ends_with("SUMMARY: AddressSanitizer: SEGV /tmp/test.c:14 in crash_segv"));
 
         let a = String::from_utf8_lossy(include_bytes!("./sanitizer_reports/asan_trunc.txt"));
@@ -137,8 +146,27 @@ mod test {
 
         assert_eq!(r.stop_reason, "SEGV");
         assert_eq!(r.operation, "");
-        assert_eq!(r.first_frame, 0); // unable to get frames on truncated reports
+        assert!(r.frames.is_empty()); // unable to get frames on truncated reports
         assert!(r.body.ends_with("access."));
+
+        let a = String::from_utf8_lossy(include_bytes!("./sanitizer_reports/asan_interceptor_gcc.txt"));
+        let r = asan_post_process(&a).unwrap();
+
+        assert_eq!(r.stop_reason, "global-buffer-overflow");
+        assert_eq!(r.operation, "READ");
+        assert_eq!(r.frames.len(), 9);
+        assert_eq!(r.frames[0], 0x7f91702c0074);
+        assert_eq!(r.frames[1], 0x7f917033554f);
+        assert_eq!(r.frames[8], 0x561eefdccbd9);
+
+        let a = String::from_utf8_lossy(include_bytes!("./sanitizer_reports/asan_interceptor.txt"));
+        let r = asan_post_process(&a).unwrap();
+
+        assert_eq!(r.stop_reason, "global-buffer-overflow");
+        assert_eq!(r.operation, "READ");
+        assert_eq!(r.frames.len(), 6);
+        assert_eq!(r.frames[0], 0x43962a);
+        assert_eq!(r.frames[5], 0x41ad89);
 
         assert!(asan_post_process("").is_none());
 
@@ -147,7 +175,7 @@ mod test {
             AsanInfo {
                 stop_reason: "CODE".into(),
                 operation: "".into(),
-                first_frame: 0,
+                frames: vec![],
                 body: m.trim().into(),
             });
     }

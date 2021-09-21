@@ -46,25 +46,30 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
         return report;
     }
 
-    let first_frame = frames.get(0).unwrap();
+    let first_frame = &frames[0];
 
-    let asan = asan_post_process(&triage_result.child.stdout);
+    let asan = asan_post_process(&triage_result.child.stderr);
 
     let first_interesting_frame = match &asan {
         Some(asan) => {
-            let mut asan_frame = None;
+            let mut found_frame = None;
 
-            // search the backtrace for a closely matching frame
-            // note that ASAN backtrace addresses and GDB addresses can be off-by-one, hence
-            // the ranged check
-            for (_, fr) in frames.iter().enumerate() {
-                if (fr.address + 1) >= asan.first_frame && (fr.address - 1) <= asan.first_frame {
-                    asan_frame = Some(fr);
-                    break;
+            // Try to resolve the most interesting sanitizer frame compared to GDB frames
+            // Note that sanitizer backtrace addresses and GDB addresses can be off-by-one, hence the ranged check
+            for asan_frame in asan.frames.iter() {
+                for fr in frames.iter() {
+                    if (fr.address + 1) >= *asan_frame && (fr.address - 1) <= *asan_frame {
+                        found_frame = Some(fr);
+                        break;
+                    }
+                }
+
+                if found_frame.is_some() {
+                    break
                 }
             }
 
-            asan_frame.unwrap_or(first_frame)
+            found_frame.unwrap_or(first_frame)
         }
         _ => first_frame,
     };
