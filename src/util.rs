@@ -65,7 +65,7 @@ pub fn isatty() -> bool {
 
 pub fn get_peak_rss() -> usize {
     unsafe {
-        let mut res: libc::rusage = std::mem::zeroed();
+        let mut res: libc::rusage = core::mem::MaybeUninit::zeroed().assume_init();
         if libc::getrusage(libc::RUSAGE_CHILDREN, &mut res) != 0 {
             res.ru_maxrss = 0;
         }

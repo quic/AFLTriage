@@ -7,6 +7,7 @@ use smol_timeout::TimeoutExt;
 use std::ffi::OsStr;
 use std::io::{Result, Error, ErrorKind};
 use std::process::{Command, ExitStatus, Output};
+use async_process::unix::CommandExt;
 use std::time::Duration;
 
 #[derive(Debug)]
@@ -38,6 +39,18 @@ fn kill_forcefully(pid: i32) {
     }
 }
 
+// SAFETY: simple signal handling
+unsafe fn pre_execute() {
+    let mut set: libc::sigset_t = core::mem::MaybeUninit::uninit().assume_init();
+
+    // GDB spawned under a controlling TTY will inherit it. This means it will also receive
+    // SIGWINCH signals, which can prevent it from properly returning piped output to the parent
+    // With this, we don't need to create a dedicated PTY and session
+    libc::sigemptyset(&mut set);
+    libc::sigaddset(&mut set, libc::SIGWINCH);
+    libc::sigprocmask(libc::SIG_BLOCK, &mut set, core::ptr::null_mut());
+}
+
 pub fn execute_capture_output_timeout<S: AsRef<OsStr>>(
     command: &str,
     args: &[S],
@@ -45,20 +58,27 @@ pub fn execute_capture_output_timeout<S: AsRef<OsStr>>(
     input: Option<Vec<u8>>
 ) -> Result<ChildResult> {
     let output: Output = block_on(async {
+        // SAFETY: only pre_exec call back is unsafe
         let mut cmd = if input.is_none() {
-            async_process::Command::new(command)
-                .stdin(async_process::Stdio::null())
-                .stdout(async_process::Stdio::piped())
-                .stderr(async_process::Stdio::piped())
-                .args(args)
-                .spawn()
+            unsafe {
+                async_process::Command::new(command)
+                    .stdin(async_process::Stdio::null())
+                    .stdout(async_process::Stdio::piped())
+                    .stderr(async_process::Stdio::piped())
+                    .pre_exec(|| Ok(pre_execute()) )
+                    .args(args)
+                    .spawn()
+            }
         } else {
-            async_process::Command::new(command)
-                .stdin(async_process::Stdio::piped())
-                .stdout(async_process::Stdio::piped())
-                .stderr(async_process::Stdio::piped())
-                .args(args)
-                .spawn()
+            unsafe {
+                async_process::Command::new(command)
+                    .stdin(async_process::Stdio::piped())
+                    .stdout(async_process::Stdio::piped())
+                    .stderr(async_process::Stdio::piped())
+                    .pre_exec(|| Ok(pre_execute()) )
+                    .args(args)
+                    .spawn()
+            }
         }?;
 
         let pid = cmd.id();
