@@ -2,7 +2,9 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 use regex::Regex;
-use std::io::{self, Error, Read, Result, BufRead};
+use std::io::{self, Error, Read, BufRead};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 lazy_static! {
     static ref ALLOWED_CHARS: Regex = Regex::new(r#"[^A-Za-z0-9_-]"#).unwrap();
@@ -38,7 +40,7 @@ pub fn sanitize(name: &str) -> String {
     s
 }
 
-pub fn read_file_to_bytes(path: &str) -> Result<Vec<u8>> {
+pub fn read_file_to_bytes(path: &str) -> io::Result<Vec<u8>> {
     let mut file = std::fs::File::open(path)?;
     let mut data = Vec::new();
 
@@ -80,3 +82,13 @@ pub fn get_peak_rss() -> usize {
         res.ru_maxrss as usize
     }
 }
+
+pub fn list_sorted_files_at(path: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut files = fs::read_dir(path)?
+        .map(|res| res.map(|e| e.path()))
+        .collect::<Result<Vec<_>, io::Error>>()?;
+
+    files.sort();
+    Ok(files)
+}
+

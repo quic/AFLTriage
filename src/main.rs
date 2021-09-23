@@ -382,7 +382,7 @@ fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Tes
                 });
             }
             UserInputPathType::PlainDir => {
-                if let Ok(tcs) = afl::afl_list_testcases(input.path.as_path()) {
+                if let Ok(tcs) = util::list_sorted_files_at(input.path.as_path()) {
                     let mut valid = 0;
                     for tc in tcs {
                         if tc.is_file() {
@@ -404,12 +404,12 @@ fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Tes
                 }
             }
             UserInputPathType::AflDir => {
-                match afl::afl_list_testcases(input.path.join("crashes").as_path()) {
+                match util::list_sorted_files_at(input.path.join("crashes").as_path()) {
                     Ok(tcs) => {
                         let mut valid = 0;
                         for tc in tcs {
                             if tc.is_file() {
-                                // TODO: filter command (.*id:.*)
+                                // TODO: robust filter command (.*id:.*)
                                 if tc.file_name().unwrap() == "README.txt" {
                                     continue;
                                 }
