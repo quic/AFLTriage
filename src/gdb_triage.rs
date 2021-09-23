@@ -131,7 +131,7 @@ pub struct GdbRegister {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GdbStopInfo {
-    pub signal: String,
+    pub signal_name: String,
     pub signal_number: i32,            // si_signo
     pub signal_code: i32,              // si_code
     pub faulting_address: Option<u64>, // sigfault.si_addr
@@ -144,10 +144,17 @@ pub struct GdbContextInfo {
     pub other_threads: Option<Vec<GdbThread>>,
 }
 
-// can be blank ({}) meaning error or target exited
+#[derive(Debug, Serialize, Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum GdbResultCode {
+    SUCCESS,
+    ERROR_TARGET_NOT_RUNNING,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GdbJsonResult {
-    pub result: Option<GdbContextInfo>,
+    pub result: GdbResultCode,
+    pub context: Option<GdbContextInfo>,
 }
 
 #[derive(Debug)]
@@ -387,8 +394,9 @@ impl GdbTriager {
         #[rustfmt::rustfmt_skip]
         let gdb_args = vec_of_strings!(
             "--batch", "--nx",
-            "-iex", "set index-cache on",
-            "-iex", "set index-cache directory gdb_cache",
+            // FIXME: index cache is a bit unreliable on earlier GDB versions
+            //"-iex", "set index-cache on",
+            //"-iex", "set index-cache directory gdb_cache",
             // write the marker to both stdout and stderr as they are not interleaved
             "-ex", MARKER_CHILD_OUTPUT.gdb_start,
             "-ex", "set logging file /dev/null",

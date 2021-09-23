@@ -31,15 +31,19 @@ use process::ChildResult;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+// arg_enum! doesn't support docstrings...
 arg_enum! {
-    #[derive(PartialEq, Debug)]
 
-    // these are user facing
+    #[derive(PartialEq, Debug)]
+    // these are user controlable options so follow normal cmdline conventions
     #[allow(non_camel_case_types)]
     pub enum OutputFormat {
+        // A simple, but opinionated text report. Don't parse this directly, choose JSON or raw instead, as the output format is unversioned
         text,
-        markdown,
-        json
+        // Opinionated fields derived from the raw triage output
+        json,
+        // Unfiltered JSON output from the triage script and child process
+        raw,
     }
 }
 
@@ -79,6 +83,7 @@ fn setup_command_line() -> ArgMatches<'static> {
                                .help("The output path for triage report files. Use '-' to print to console."))
                           .arg(Arg::with_name("jobs")
                                .short("-j")
+                               .long("--jobs")
                                .takes_value(true)
                                .help("How many threads to use during triage."))
                           .arg(Arg::with_name("timeout")
@@ -89,7 +94,7 @@ fn setup_command_line() -> ArgMatches<'static> {
                                .help("The timeout in milliseconds for each testcase to triage."))
                           .arg(Arg::with_name("debug")
                                .long("--debug")
-                               .help("Enable low-level debugging of triage operations."))
+                               .help("Enable low-level debugging output of triage operations."))
                           .arg(Arg::with_name("child_output")
                                .long("--child-output")
                                .help("Include child output in triage reports."))
@@ -101,11 +106,13 @@ fn setup_command_line() -> ArgMatches<'static> {
                           .arg(Arg::with_name("ofmt")
                                .long("--output-format")
                                .takes_value(true)
+                               .multiple(true)
+                               .use_delimiter(true)
                                .possible_values(&OutputFormat::variants())
                                .default_value("text")
                                .required(false)
                                .case_insensitive(true)
-                               .help("The triage report output format."))
+                               .help("The triage report output format (multiple values allowed)."))
                           .arg(Arg::with_name("stdin")
                                .long("--stdin")
                                .takes_value(false)
@@ -246,10 +253,9 @@ fn triage_test_case(
             }
         };
 
-    if triage_result.response.result.is_none() {
-        TriageResult::NoCrash(triage_result.child)
-    } else {
-        TriageResult::Crash(triage_result)
+    match triage_result.response.result {
+        gdb_triage::GdbResultCode::SUCCESS => TriageResult::Crash(triage_result),
+        gdb_triage::GdbResultCode::ERROR_TARGET_NOT_RUNNING => TriageResult::NoCrash(triage_result.child),
     }
 }
 
@@ -733,11 +739,6 @@ fn main_wrapper() -> i32 {
         let path = testcase.path.to_str().unwrap();
         let result = triage_test_case(&gdb, &binary_args, path, debug, input_stdin, timeout_ms);
 
-        let report = match &result {
-            TriageResult::Crash(triage) => Some(report::text::format_text_report(triage)),
-            _ => None,
-        };
-
         // do very little with this lock held. do not reorder
         let mut state = state.lock().unwrap();
 
@@ -759,8 +760,7 @@ fn main_wrapper() -> i32 {
                 }
             }
             TriageResult::Crash(triage) => {
-                let report = report.as_ref().unwrap();
-
+                let report = report::text::format_text_report(&triage);
                 state.crashed += 1;
 
                 if !state.crash_signature.contains(&report.stackhash) {

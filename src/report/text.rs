@@ -36,7 +36,7 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
         backtrace: "".to_string(),
     };
 
-    let ctx_info: &GdbContextInfo = triage_result.response.result.as_ref().unwrap();
+    let ctx_info: &GdbContextInfo = triage_result.response.context.as_ref().unwrap();
     let primary_thread = &ctx_info.primary_thread;
 
     let frames = &primary_thread.backtrace[0..];
@@ -83,11 +83,11 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
     let stop_info = &ctx_info.stop_info;
     let signal_info = format!(
         "{} (si_signo={})",
-        stop_info.signal, stop_info.signal_number
+        stop_info.signal_name, stop_info.signal_number
     );
     let signal_code_info = format!(
         "{} (si_code={})",
-        si_code_to_string(&stop_info.signal, stop_info.signal_code as i8),
+        si_code_to_string(&stop_info.signal_name, stop_info.signal_code as i8),
         stop_info.signal_code
     );
 
@@ -123,7 +123,7 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
                 report.crashing_function, fault_address, signal_info, signal_code_info,
             );
 
-            report.terse_headline = format!("{}_{}", stop_info.signal, report.crashing_function);
+            report.terse_headline = format!("{}_{}", stop_info.signal_name, report.crashing_function);
         }
     }
 
