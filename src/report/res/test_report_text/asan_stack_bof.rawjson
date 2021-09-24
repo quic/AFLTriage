@@ -1,1 +1,345 @@
-{"result": "SUCCESS", "context": {"stop_info": {"signal_name": "SIGABRT", "signal_number": 6, "signal_code": -6}, "primary_thread": {"tid": 1, "backtrace": [{"address": 140737335525303, "relative_address": 257975, "module": "/lib/x86_64-linux-gnu/libc-2.27.so", "module_address": "/lib/x86_64-linux-gnu/libc-2.27.so+0x3efb7", "symbol": {"function_name": "__GI_raise", "function_line": 27, "mangled_function_name": "__GI_raise", "function_signature": "int (int)", "file": "../sysdeps/unix/sysv/linux/raise.c", "line": 51, "args": [{"type": "int", "name": "sig", "value": "6"}], "locals": [{"type": "sigset_t", "name": "set", "value": "{__val = {134217728, 0 <repeats 11 times>, 3399988123389603631, 140737352425472, 140737488343616, 140737488340486}}"}, {"type": "pid_t", "name": "pid", "value": "<optimized out>"}, {"type": "pid_t", "name": "tid", "value": "<optimized out>"}]}}, {"address": 140737335531809, "relative_address": 264481, "module": "/lib/x86_64-linux-gnu/libc-2.27.so", "module_address": "/lib/x86_64-linux-gnu/libc-2.27.so+0x40921", "symbol": {"function_name": "__GI_abort", "function_line": 48, "mangled_function_name": "__GI_abort", "function_signature": "void (void)", "file": "abort.c", "line": 79, "locals": [{"type": "int", "name": "save_stage", "value": "1"}, {"type": "struct sigaction", "name": "act", "value": "{__sigaction_handler = {sa_handler = 0x0, sa_sigaction = 0x0}, sa_mask = {__val = {0 <repeats 11 times>, 4, 4356331, 0, 5241382, 140737488343728}}, sa_flags = -13800, sa_restorer = 0x13ad438 <__sanitizer::CheckFailed(char const*, int, char const*, unsigned long long, unsigned long long)::num_calls>}"}, {"type": "sigset_t", "name": "sigs", "value": "{__val = {32, 0 <repeats 15 times>}}"}]}}, {"address": 5255803, "relative_address": 955883, "module": "/tmp/test", "module_address": "/tmp/test (.text)+0xe95eb", "symbol": {"function_name": "_ _sanitizer::Abort()"}}, {"address": 5244328, "relative_address": 944408, "module": "/tmp/test", "module_address": "/tmp/test (.text)+0xe6918", "symbol": {"function_name": "__sanitizer::Die()"}}, {"address": 5122093, "relative_address": 822173, "module": "/tmp/test", "module_address": "/tmp/test (.text)+0xc8b9d", "symbol": {"function_name": "__asan::ReportGenericError(unsigned long, unsigned long, unsigned long, unsigned long, bool, unsigned long, unsigned int, bool)"}}, {"address": 5124120, "relative_address": 824200, "module": "/tmp/test", "module_address": "/tmp/test (.text)+0xc9388", "symbol": {"function_name": "__asan_report_load4"}}, {"address": 5317336, "relative_address": 1017416, "module" : "/tmp/test", "module_address": "/tmp/test (.text)+0xf8648", "symbol": {"function_name": "bad_read", "function_line": 17, "mangled_function_name": "bad_read", "function_signature": "void ()", "callsite": ["{", "  int arr[] = {0, 1, 2, 3};", "  int c = arr[4];"], "file": "test.c", "line": 20, "locals": [{"type": "int [4]", "name": "arr", "value": "{0, 1, 2, 3}"}, {"type": "int", "name": "c", "value": "32767"}]}}, {"address": 5317578, "relative_address": 1017658, "module": "/tmp/test", "module_address": "/tmp/test (.text)+0xf873a", "symbol": {"function_name": "main", "function_line": 29, "mangled_function_name": "main", "function_signature": "int ()", "callsite": ["  fprintf(stderr, \"Executing!\\n\");", "  //crash_fpe();", "  bad_read();"], "file": "test.c", "line": 33}}], "registers": [{"name": "rax", "value": 0, "pretty_value": "0", "type": "int64_t", "size": 8}, {"name": "rbx", "value": 20632632, "pretty_value": "20632632", "type": "int64_t", "size": 8}, {"name": "rcx", "value": 140737335525303, "pretty_value": "140737335525303", "type": "int64_t", "size": 8}, {"name": "rdx", "value": 0, "pretty_value": "0", "type": "int64_t", "size": 8}, {"name": "rsi", "value": 140737488339648, "pretty_value": "140737488339648", "type": "int64_t", "size": 8}, {"name": "rdi", "value": 2, "pretty_value": "2", "type": "int64_t", "size": 8}, {"name": "rbp", "value": 20632632, "pretty_value": "0x13ad438 <__sanitizer::CheckFailed(char const*, int, char const*, unsigned long long, unsigned long long)::num_calls>", "type": "*1", "size": 8}, {"name": "rsp", "value": 140737488339648, "pretty_value": "0x7fffffffc2c0", "type": "*1", "size": 8}, {"name": "r8", "value": 0, "pretty_value": "0", "type": "int64_t", "size": 8}, {"name": "r9", "value": 140737488339648, "pretty_value": "140737488339648", "type": "int64_t", "size": 8}, {"name": "r10", "value": 8, "pretty_value": "8", "type": "int64_t", "size": 8}, {"name": "r11", "value": 582, "pretty_value": "582", "type": "int64_t", "size": 8}, {"name": "r12", "value": 140737488340486, "pretty_value": "140737488340486", "type": "int64_t", "size": 8}, {"name": "r13", "value": 12242368, "pretty_value": "12242368", "type": "int64_t", "size": 8}, {"name": "r14", "value": 140737488343728, "pretty_value": "140737488343728", "type": "int64_t", "size": 8}, {"name": "r15", "value": 4, "pretty_value": "4", "type": "int64_t", "size": 8}, {"name": "rip", "value": 140737335525303, "pretty_value": "0x7ffff6e3ffb7 <__GI_raise+199>", "type": "*1", "size": 8}, {"name": "eflags", "value": 582, "pretty_value": "[ PF ZF IF ]", "type": "i386_eflags", "size": 4}, {"name": "cs", "value": 51, "pretty_value": "51", "type": "int32_t", "size": 4}, {"name": "ss", "value": 43, "pretty_value": "43", "type": "int32_t", "size": 4}, {"name": "ds", "value": 0, "pretty_value": "0", "type": "int32_t", "size": 4}, {"name": "es", "value": 0, "pretty_value": "0", "type": "int32_t", "size": 4}, {"name": "fs", "value": 0, "pretty_value": "0", "type": "int32_t", "size": 4}, {"name": "gs", "value": 0, "pretty_value": "0", "type": "int32_t", "size": 4}], "current_instruction": "mov    rcx,QWORD PTR [rsp+0x108]"}}}
+{
+   "result" : "SUCCESS",
+   "context" : {
+      "primary_thread" : {
+         "backtrace" : [
+            {
+               "relative_address" : 257975,
+               "module_address" : "/lib/x86_64-linux-gnu/libc-2.27.so+0x3efb7",
+               "module" : "/lib/x86_64-linux-gnu/libc-2.27.so",
+               "address" : 140737335525303,
+               "symbol" : {
+                  "function_signature" : "int (int)",
+                  "function_line" : 27,
+                  "file" : "../sysdeps/unix/sysv/linux/raise.c",
+                  "locals" : [
+                     {
+                        "type" : "sigset_t",
+                        "name" : "set",
+                        "value" : "{__val = {134217728, 0 <repeats 11 times>, 3399988123389603631, 140737352425472, 140737488343616, 140737488340486}}"
+                     },
+                     {
+                        "value" : "<optimized out>",
+                        "name" : "pid",
+                        "type" : "pid_t"
+                     },
+                     {
+                        "type" : "pid_t",
+                        "value" : "<optimized out>",
+                        "name" : "tid"
+                     }
+                  ],
+                  "function_name" : "__GI_raise",
+                  "args" : [
+                     {
+                        "name" : "sig",
+                        "value" : "6",
+                        "type" : "int"
+                     }
+                  ],
+                  "line" : 51,
+                  "mangled_function_name" : "__GI_raise"
+               }
+            },
+            {
+               "symbol" : {
+                  "file" : "abort.c",
+                  "locals" : [
+                     {
+                        "value" : "1",
+                        "name" : "save_stage",
+                        "type" : "int"
+                     },
+                     {
+                        "value" : "{__sigaction_handler = {sa_handler = 0x0, sa_sigaction = 0x0}, sa_mask = {__val = {0 <repeats 11 times>, 4, 4356331, 0, 5241382, 140737488343728}}, sa_flags = -13800, sa_restorer = 0x13ad438 <__sanitizer::CheckFailed(char const*, int, char const*, unsigned long long, unsigned long long)::num_calls>}",
+                        "name" : "act",
+                        "type" : "struct sigaction"
+                     },
+                     {
+                        "type" : "sigset_t",
+                        "value" : "{__val = {32, 0 <repeats 15 times>}}",
+                        "name" : "sigs"
+                     }
+                  ],
+                  "function_name" : "__GI_abort",
+                  "line" : 79,
+                  "mangled_function_name" : "__GI_abort",
+                  "function_signature" : "void (void)",
+                  "function_line" : 48
+               },
+               "module_address" : "/lib/x86_64-linux-gnu/libc-2.27.so+0x40921",
+               "address" : 140737335531809,
+               "module" : "/lib/x86_64-linux-gnu/libc-2.27.so",
+               "relative_address" : 264481
+            },
+            {
+               "module_address" : "/tmp/test (.text)+0xe95eb",
+               "module" : "/tmp/test",
+               "address" : 5255803,
+               "symbol" : {
+                  "function_name" : "_ _sanitizer::Abort()"
+               },
+               "relative_address" : 955883
+            },
+            {
+               "symbol" : {
+                  "function_name" : "__sanitizer::Die()"
+               },
+               "module_address" : "/tmp/test (.text)+0xe6918",
+               "module" : "/tmp/test",
+               "address" : 5244328,
+               "relative_address" : 944408
+            },
+            {
+               "relative_address" : 822173,
+               "address" : 5122093,
+               "module_address" : "/tmp/test (.text)+0xc8b9d",
+               "module" : "/tmp/test",
+               "symbol" : {
+                  "function_name" : "__asan::ReportGenericError(unsigned long, unsigned long, unsigned long, unsigned long, bool, unsigned long, unsigned int, bool)"
+               }
+            },
+            {
+               "symbol" : {
+                  "function_name" : "__asan_report_load4"
+               },
+               "address" : 5124120,
+               "module_address" : "/tmp/test (.text)+0xc9388",
+               "module" : "/tmp/test",
+               "relative_address" : 824200
+            },
+            {
+               "symbol" : {
+                  "mangled_function_name" : "bad_read",
+                  "line" : 20,
+                  "locals" : [
+                     {
+                        "type" : "int [4]",
+                        "name" : "arr",
+                        "value" : "{0, 1, 2, 3}"
+                     },
+                     {
+                        "type" : "int",
+                        "value" : "32767",
+                        "name" : "c"
+                     }
+                  ],
+                  "function_name" : "bad_read",
+                  "function_line" : 17,
+                  "callsite" : [
+                     "{",
+                     "  int arr[] = {0, 1, 2, 3};",
+                     "  int c = arr[4];"
+                  ],
+                  "function_signature" : "void ()",
+                  "file" : "test.c"
+               },
+               "module_address" : "/tmp/test (.text)+0xf8648",
+               "module" : "/tmp/test",
+               "address" : 5317336,
+               "relative_address" : 1017416
+            },
+            {
+               "relative_address" : 1017658,
+               "module_address" : "/tmp/test (.text)+0xf873a",
+               "module" : "/tmp/test",
+               "address" : 5317578,
+               "symbol" : {
+                  "function_signature" : "int ()",
+                  "function_line" : 29,
+                  "callsite" : [
+                     "  fprintf(stderr, \"Executing!\\n\");",
+                     "  //crash_fpe();",
+                     "  bad_read();"
+                  ],
+                  "file" : "test.c",
+                  "function_name" : "main",
+                  "line" : 33,
+                  "mangled_function_name" : "main"
+               }
+            }
+         ],
+         "registers" : [
+            {
+               "value" : 0,
+               "size" : 8,
+               "name" : "rax",
+               "pretty_value" : "0",
+               "type" : "int64_t"
+            },
+            {
+               "name" : "rbx",
+               "size" : 8,
+               "value" : 20632632,
+               "type" : "int64_t",
+               "pretty_value" : "20632632"
+            },
+            {
+               "value" : 140737335525303,
+               "size" : 8,
+               "name" : "rcx",
+               "pretty_value" : "140737335525303",
+               "type" : "int64_t"
+            },
+            {
+               "type" : "int64_t",
+               "pretty_value" : "0",
+               "name" : "rdx",
+               "size" : 8,
+               "value" : 0
+            },
+            {
+               "value" : 140737488339648,
+               "size" : 8,
+               "name" : "rsi",
+               "type" : "int64_t",
+               "pretty_value" : "140737488339648"
+            },
+            {
+               "name" : "rdi",
+               "size" : 8,
+               "value" : 2,
+               "type" : "int64_t",
+               "pretty_value" : "2"
+            },
+            {
+               "type" : "*1",
+               "pretty_value" : "0x13ad438 <__sanitizer::CheckFailed(char const*, int, char const*, unsigned long long, unsigned long long)::num_calls>",
+               "size" : 8,
+               "value" : 20632632,
+               "name" : "rbp"
+            },
+            {
+               "pretty_value" : "0x7fffffffc2c0",
+               "type" : "*1",
+               "size" : 8,
+               "name" : "rsp",
+               "value" : 140737488339648
+            },
+            {
+               "type" : "int64_t",
+               "pretty_value" : "0",
+               "name" : "r8",
+               "size" : 8,
+               "value" : 0
+            },
+            {
+               "value" : 140737488339648,
+               "size" : 8,
+               "name" : "r9",
+               "type" : "int64_t",
+               "pretty_value" : "140737488339648"
+            },
+            {
+               "type" : "int64_t",
+               "pretty_value" : "8",
+               "size" : 8,
+               "value" : 8,
+               "name" : "r10"
+            },
+            {
+               "size" : 8,
+               "name" : "r11",
+               "value" : 582,
+               "type" : "int64_t",
+               "pretty_value" : "582"
+            },
+            {
+               "value" : 140737488340486,
+               "size" : 8,
+               "name" : "r12",
+               "type" : "int64_t",
+               "pretty_value" : "140737488340486"
+            },
+            {
+               "size" : 8,
+               "name" : "r13",
+               "value" : 12242368,
+               "type" : "int64_t",
+               "pretty_value" : "12242368"
+            },
+            {
+               "value" : 140737488343728,
+               "size" : 8,
+               "name" : "r14",
+               "pretty_value" : "140737488343728",
+               "type" : "int64_t"
+            },
+            {
+               "value" : 4,
+               "size" : 8,
+               "name" : "r15",
+               "pretty_value" : "4",
+               "type" : "int64_t"
+            },
+            {
+               "size" : 8,
+               "value" : 140737335525303,
+               "name" : "rip",
+               "type" : "*1",
+               "pretty_value" : "0x7ffff6e3ffb7 <__GI_raise+199>"
+            },
+            {
+               "value" : 582,
+               "size" : 4,
+               "name" : "eflags",
+               "type" : "i386_eflags",
+               "pretty_value" : "[ PF ZF IF ]"
+            },
+            {
+               "pretty_value" : "51",
+               "type" : "int32_t",
+               "size" : 4,
+               "value" : 51,
+               "name" : "cs"
+            },
+            {
+               "pretty_value" : "43",
+               "type" : "int32_t",
+               "size" : 4,
+               "value" : 43,
+               "name" : "ss"
+            },
+            {
+               "value" : 0,
+               "size" : 4,
+               "name" : "ds",
+               "type" : "int32_t",
+               "pretty_value" : "0"
+            },
+            {
+               "type" : "int32_t",
+               "pretty_value" : "0",
+               "value" : 0,
+               "size" : 4,
+               "name" : "es"
+            },
+            {
+               "size" : 4,
+               "value" : 0,
+               "name" : "fs",
+               "pretty_value" : "0",
+               "type" : "int32_t"
+            },
+            {
+               "type" : "int32_t",
+               "pretty_value" : "0",
+               "size" : 4,
+               "name" : "gs",
+               "value" : 0
+            }
+         ],
+         "tid" : 1,
+         "current_instruction" : "mov    rcx,QWORD PTR [rsp+0x108]"
+      },
+      "stop_info" : {
+         "signal_code" : -6,
+         "signal_name" : "SIGABRT",
+         "signal_number" : 6
+      },
+      "arch_info" : {
+         "architecture" : "i368:x86-64",
+         "address_bits" : 64
+      }
+   }
+}

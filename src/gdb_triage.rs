@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 use std::io::{ErrorKind, Write};
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use crate::process::{self, ChildResult};
 
@@ -18,8 +19,8 @@ pub struct GdbSymbol {
     pub callsite: Option<Vec<String>>,
     pub file: Option<String>,
     pub line: Option<i64>,
-    pub args: Option<Vec<GdbVariable>>,
-    pub locals: Option<Vec<GdbVariable>>,
+    pub args: Option<Vec<Rc<GdbVariable>>>,
+    pub locals: Option<Vec<Rc<GdbVariable>>>,
 }
 
 impl GdbSymbol {
@@ -108,7 +109,7 @@ pub struct GdbFrameInfo {
     pub relative_address: u64,
     pub module: String,
     pub module_address: String,
-    pub symbol: Option<GdbSymbol>,
+    pub symbol: Option<Rc<GdbSymbol>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -117,7 +118,7 @@ pub struct GdbThread {
     pub backtrace: Vec<GdbFrameInfo>,
     pub current_instruction: Option<String>,
     /// Registers are passed in the GDB defined order
-    pub registers: Option<Vec<GdbRegister>>,
+    pub registers: Option<Vec<Rc<GdbRegister>>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -140,8 +141,15 @@ pub struct GdbStopInfo {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct GdbArchInfo {
+    pub address_bits: usize,
+    pub architecture: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GdbContextInfo {
     pub stop_info: GdbStopInfo,
+    pub arch_info: GdbArchInfo,
     pub primary_thread: GdbThread,
     pub other_threads: Option<Vec<GdbThread>>,
 }

@@ -28,7 +28,8 @@ r_FILE_INFO = re.compile(r"(0x[a-fA-F0-9]+) - (0x[a-fA-F0-9]+) is ([^\s]+)( in .
 
 #  Name         Nr  Rel Offset    Size  Type            Groups
 # eax           0    0      0       4 int32_t         general,all,save,restore
-r_REGISTER_LIST = re.compile(r"([^\s]+)\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)\s+([0-9]+)\s+([^\s]+)\s+([^\s]+)")
+# NOTE: offset and type can have footnotes "*1", "*2" when the offset is inconsistent or the type name is NULL. See gdb/regcache.c for more info
+r_REGISTER_LIST = re.compile(r"([^\s]+)\s+([0-9]+)\s+([0-9]+)\s+(\*?[0-9]+)\s+([0-9]+)\s+([^\s]+)\s+([^\s]+)")
 r_REGISTER_VALUES = re.compile(r"([^\s]+)\s+(0x[a-fA-F0-9]+)\s+(.*)")
 
 #### OPTIONS
@@ -106,11 +107,19 @@ def get_register_list():
 
         number = int(number)
         rel = int(rel)
-        offset = int(offset)
+        # Footnote indicating error
+        if offset.startswith("*"):
+            offset = 0
+        else:
+            offset = int(offset)
         size = int(size)
 
         if size == 0:
             continue
+
+        # Footnote indicating missing type
+        if ty.startswith("*"):
+            ty = ""
 
         groups = groups.split(",")
 
@@ -436,13 +445,10 @@ def get_stop_info():
 
     return sinfo
 
-def backtrace_all(primary_thread, stop_info):
+def get_thread_stop_context(primary_thread):
     gdb_state = {}
 
     assert primary_thread
-    assert stop_info
-
-    gdb_state["stop_info"] = stop_info
 
     pri_thread_info = {}
     pri_thread_info["tid"] = xint(primary_thread.num)
@@ -578,6 +584,29 @@ def get_module_sections():
 def get_primary_module_path():
     return gdb.progspaces()[0].filename
 
+def get_current_architecture():
+    if hasattr(gdb.selected_inferior(), "architecture"):
+        return gdb.selected_inferior().architecture().name()
+    else:
+        match = re.search(r"(\(currently ([^)]+)\))|(assumed to be (.+))", gdb.execute("show architecture", to_string=True))
+        if match is None:
+            return "UNKNOWN"
+
+        arch = match.group(2)
+        return arch
+
+def get_arch_info():
+    bits = int(gdb.parse_and_eval("sizeof($pc)"))*8
+    if bits == 0:
+        bits = 32
+
+    v = {
+       "address_bits": bits,
+       "architecture": get_current_architecture(),
+    }
+
+    return v
+
 class GDBTriageCommand(gdb.Command):
     def __init__(self):
         gdb.Command.__init__(self, "gdbtriage", gdb.COMMAND_OBSCURE)
@@ -600,14 +629,16 @@ class GDBTriageCommand(gdb.Command):
 
         # Target or doesn't exist!
         if primary_thread is not None:
+            # Assumes success. Failures should be handled internally. Otherwise throw
+            response = { "result": "SUCCESS" }
+
+            ctx = get_thread_stop_context(primary_thread)
+            ctx["arch_info"] = get_arch_info()
             # we must have stop info
             # TODO: handle other platforms (non Linux) stop info
-            stop_info = get_stop_info()
+            ctx["stop_info"] = get_stop_info()
 
-            bt = backtrace_all(primary_thread, stop_info)
-
-            # Assumes success. Failures should be handled internally. Otherwise except
-            response = {"result": "SUCCESS", "context": bt}
+            response["context"] = ctx
         else:
             response = {"result": "ERROR_TARGET_NOT_RUNNING"}
 
