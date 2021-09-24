@@ -70,6 +70,8 @@ pub struct EnrichedThreadInfo {
     /// Registers may be collected during debugger backtracing
     /// Order is based on the debugging backend
     pub regs: Option<Vec<Rc<GdbRegister>>>,
+    /// One or more instructions that were collected for this thread
+    pub instruction_context: Option<Vec<EnrichedInstructionContext>>,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -95,8 +97,6 @@ pub struct EnrichedFrameInfo {
     pub module_address: String,
     /// Symbol information for the frame's function, if available
     pub symbol: Option<Rc<GdbSymbol>>,
-    /// One or more instructions that were collected for this frame.
-    pub instruction_context: Option<Vec<EnrichedInstructionContext>>,
     /// One or more lines of source that were collected for this frame.
     pub source_context: Option<Vec<EnrichedSourceContext>>,
 }
@@ -190,13 +190,56 @@ pub fn enrich_triage_info(opt: &ReportOptions, triage_result: &GdbTriageResult) 
 }
 
 fn build_thread_info(arch_info: &GdbArchInfo, thread: &GdbThread) -> EnrichedThreadInfo {
-    let frames = vec![];
+    let frames: Vec<EnrichedFrameInfo> = thread.backtrace.iter().map(|f| build_frame_info(arch_info, f)).collect();
     let regs = thread.registers.as_ref().map(|d| d.clone());
+    let first_insn_ctx = thread.current_instruction.as_ref()
+        .map(|i| build_instruction_context(arch_info, &regs, i.to_string(), frames[0].address.r));
+    let insnctx = first_insn_ctx.map(|i| vec![i]);
 
     EnrichedThreadInfo {
         frames,
         regs,
+        instruction_context: insnctx,
     }
+}
+
+//fn build_reference_list(needles: Vec<&str>, haystack: Vec<&str>) ->
+
+fn build_instruction_context(arch_info: &GdbArchInfo, regs: &Option<Vec<Rc<GdbRegister>>>, insn: String, addr: u64) -> EnrichedInstructionContext {
+    let referenced_regs = None;
+
+    EnrichedInstructionContext {
+        address: AddressView::new(addr, arch_info.address_bits),
+        insn,
+        referenced_regs,
+    }
+}
+
+fn build_source_context(arch_info: &GdbArchInfo, symbol: &Rc<GdbSymbol>) -> Option<Vec<EnrichedSourceContext>> {
+    let mut ctx = vec![];
+
+    if symbol.callsite.is_none() || symbol.file.is_none() ||
+        symbol.line.is_none() {
+        return None
+    }
+
+    let lines = symbol.callsite.as_ref().unwrap();
+    let file = symbol.file.as_ref().unwrap();
+    let start_line = symbol.line.unwrap();
+
+    for (i, code) in lines.iter().enumerate() {
+        let line_no = (start_line as usize) - lines.len() + i + 1;
+        let references = None;
+
+        ctx.push(EnrichedSourceContext {
+            file: file.to_string(),
+            line_no,
+            source: code.to_string(),
+            references,
+        })
+    }
+
+    Some(ctx)
 }
 
 fn build_frame_info(arch_info: &GdbArchInfo, fr: &GdbFrameInfo) -> EnrichedFrameInfo {
@@ -206,10 +249,11 @@ fn build_frame_info(arch_info: &GdbArchInfo, fr: &GdbFrameInfo) -> EnrichedFrame
     let module_address = fr.module_address.to_string();
     // TODO: only include symbols necessary
     let symbol = fr.symbol.as_ref().map(|d| Rc::clone(d));
-    let insnctx = None;
-    let srcctx = None;
+    let srcctx = symbol.as_ref().map(|s| build_source_context(arch_info, s)).flatten();
 
-    let summary = "".into();
+    let summary = fr.symbol.as_ref()
+        .map(|d| format!("{} in {} ({})", address.f, d.format(), module))
+        .unwrap_or(format!("{} in {}", address.f, module));
 
     EnrichedFrameInfo {
         summary,
@@ -218,7 +262,6 @@ fn build_frame_info(arch_info: &GdbArchInfo, fr: &GdbFrameInfo) -> EnrichedFrame
         module,
         module_address,
         symbol,
-        instruction_context: insnctx,
         source_context: srcctx,
     }
 }
