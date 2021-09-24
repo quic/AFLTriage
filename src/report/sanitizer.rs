@@ -1,6 +1,7 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
+use serde::{Deserialize, Serialize};
 use regex::Regex;
 
 lazy_static! {
@@ -16,8 +17,9 @@ lazy_static! {
     static ref R_ASAN_FRAME: Regex = Regex::new(r#"#(?P<num>[0-9]+)\s+(?P<addr>0x[a-fA-F0-9]+)"#).unwrap();
 }
 
-#[derive(Debug, PartialEq)]
-pub struct AsanInfo {
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct SanitizerReport {
+    pub sanitizer: String,
     pub stop_reason: String,
     pub operation: String,
     pub frames: Vec<u64>,
@@ -25,7 +27,7 @@ pub struct AsanInfo {
 }
 
 // TODO: support multiple sanitizer reports in successsion
-pub fn asan_post_process(input: &str) -> Option<AsanInfo> {
+pub fn sanitizer_report_extract(input: &str) -> Option<SanitizerReport> {
     // find the NEWEST sanitizer headline
     // regex doesn't support finding in reverse so we go at it forward
     let asan_match = R_ASAN_HEADLINE.captures_iter(input).last();
@@ -88,7 +90,8 @@ pub fn asan_post_process(input: &str) -> Option<AsanInfo> {
         _ => "",
     };
 
-    Some(AsanInfo {
+    Some(SanitizerReport {
+        sanitizer: "AddressSanitizer".into(), // TODO: support more sanitizers
         stop_reason,
         operation: operation.to_string(),
         frames: asan_frames,
@@ -100,57 +103,73 @@ pub fn asan_post_process(input: &str) -> Option<AsanInfo> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::path::PathBuf;
+
+    fn load_test(p: &str) -> String {
+        std::str::from_utf8(
+            &crate::util::read_file_to_bytes(test_path(p).to_str().unwrap()).unwrap()
+        ).unwrap().to_string()
+    }
+
+    fn test_path(p: &str) -> PathBuf {
+        let mut path = PathBuf::from(file!());
+        path.pop();
+        path.push("res");
+        path.push("test_sanitizer_reports");
+        path.push(p);
+        path
+    }
 
     #[test]
     fn test_asan_report_parsing() {
-        let a = String::from_utf8_lossy(include_bytes!("./sanitizer_reports/asan_fpe.txt"));
-        let r = asan_post_process(&a).unwrap();
+        let a = load_test("asan_fpe.txt");
+        let r = sanitizer_report_extract(&a).unwrap();
 
         assert_eq!(r.stop_reason, "FPE");
         assert_eq!(r.operation, "");
         assert_eq!(r.frames[0], 0x560b425587af);
 
-        let a = String::from_utf8_lossy(include_bytes!("./sanitizer_reports/asan_segv.txt"));
-        let r = asan_post_process(&a).unwrap();
+        let a = load_test("asan_segv.txt");
+        let r = sanitizer_report_extract(&a).unwrap();
 
         assert_eq!(r.stop_reason, "SEGV");
         assert_eq!(r.operation, "");
         assert_eq!(r.frames[0], 0x561010d1d83b);
 
-        let a = String::from_utf8_lossy(include_bytes!("./sanitizer_reports/asan_oob_read.txt"));
-        let r = asan_post_process(&a).unwrap();
+        let a = load_test("asan_oob_read.txt");
+        let r = sanitizer_report_extract(&a).unwrap();
 
         assert_eq!(r.stop_reason, "stack-buffer-overflow");
         assert_eq!(r.operation, "READ");
         assert_eq!(r.frames[0], 0x5561e001bba8);
         assert_eq!(r.body, a.trim());
 
-        let a = String::from_utf8_lossy(include_bytes!("./sanitizer_reports/asan_multi.txt"));
-        let r = asan_post_process(&a).unwrap();
+        let a = load_test("asan_multi.txt");
+        let r = sanitizer_report_extract(&a).unwrap();
 
         assert_eq!(r.stop_reason, "SEGV");
         assert_eq!(r.operation, "");
         assert_eq!(r.frames[0], 0x561010d1d83b);
         assert!(r.body.ends_with("==32232==ABORTING"));
 
-        let a = String::from_utf8_lossy(include_bytes!("./sanitizer_reports/asan_no_end.txt"));
-        let r = asan_post_process(&a).unwrap();
+        let a = load_test("asan_no_end.txt");
+        let r = sanitizer_report_extract(&a).unwrap();
 
         assert_eq!(r.stop_reason, "SEGV");
         assert_eq!(r.operation, "");
         assert_eq!(r.frames[0], 0x561010d1d83b);
         assert!(r.body.ends_with("SUMMARY: AddressSanitizer: SEGV /tmp/test.c:14 in crash_segv"));
 
-        let a = String::from_utf8_lossy(include_bytes!("./sanitizer_reports/asan_trunc.txt"));
-        let r = asan_post_process(&a).unwrap();
+        let a = load_test("asan_trunc.txt");
+        let r = sanitizer_report_extract(&a).unwrap();
 
         assert_eq!(r.stop_reason, "SEGV");
         assert_eq!(r.operation, "");
         assert!(r.frames.is_empty()); // unable to get frames on truncated reports
         assert!(r.body.ends_with("access."));
 
-        let a = String::from_utf8_lossy(include_bytes!("./sanitizer_reports/asan_interceptor_gcc.txt"));
-        let r = asan_post_process(&a).unwrap();
+        let a = load_test("asan_interceptor_gcc.txt");
+        let r = sanitizer_report_extract(&a).unwrap();
 
         assert_eq!(r.stop_reason, "global-buffer-overflow");
         assert_eq!(r.operation, "READ");
@@ -159,8 +178,8 @@ mod test {
         assert_eq!(r.frames[1], 0x7f917033554f);
         assert_eq!(r.frames[8], 0x561eefdccbd9);
 
-        let a = String::from_utf8_lossy(include_bytes!("./sanitizer_reports/asan_interceptor.txt"));
-        let r = asan_post_process(&a).unwrap();
+        let a = load_test("asan_interceptor.txt");
+        let r = sanitizer_report_extract(&a).unwrap();
 
         assert_eq!(r.stop_reason, "global-buffer-overflow");
         assert_eq!(r.operation, "READ");
@@ -168,11 +187,12 @@ mod test {
         assert_eq!(r.frames[0], 0x43962a);
         assert_eq!(r.frames[5], 0x41ad89);
 
-        assert!(asan_post_process("").is_none());
+        assert!(sanitizer_report_extract("").is_none());
 
         let m = "==1==ERROR: AddressSanitizer: CODE\n";
-        assert_eq!(asan_post_process("==1==ERROR: AddressSanitizer: CODE\n").unwrap(),
-            AsanInfo {
+        assert_eq!(sanitizer_report_extract("==1==ERROR: AddressSanitizer: CODE\n").unwrap(),
+            SanitizerReport {
+                sanitizer:  "AddressSanitizer".into(),
                 stop_reason: "CODE".into(),
                 operation: "".into(),
                 frames: vec![],

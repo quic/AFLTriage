@@ -1,0 +1,124 @@
+Summary: ASAN detected stack-buffer-overflow in bad_read after a READ leading to SIGABRT (si_signo=6) / SI_TKILL (si_code=-6)
+Command line: ./test @@
+Testcase: test.c
+Stack hash: 4457d80db1478a7c708b1fa3c49f5b1a
+
+Register info:
+   rax - 0x0000000000000000 (0)
+   rbx - 0x00000000013ad438 (20632632)
+   rcx - 0x00007ffff6e3ffb7 (140737335525303)
+   rdx - 0x0000000000000000 (0)
+   rsi - 0x00007fffffffc2c0 (140737488339648)
+   rdi - 0x0000000000000002 (2)
+   rbp - 0x00000000013ad438 (0x13ad438 <__sanitizer::CheckFailed(char const*, int, char const*, unsigned long long, unsigned long long)::num_calls>)
+   rsp - 0x00007fffffffc2c0 (0x7fffffffc2c0)
+    r8 - 0x0000000000000000 (0)
+    r9 - 0x00007fffffffc2c0 (140737488339648)
+   r10 - 0x0000000000000008 (8)
+   r11 - 0x0000000000000246 (582)
+   r12 - 0x00007fffffffc606 (140737488340486)
+   r13 - 0x0000000000bacdc0 (12242368)
+   r14 - 0x00007fffffffd2b0 (140737488343728)
+   r15 - 0x0000000000000004 (4)
+   rip - 0x00007ffff6e3ffb7 (0x7ffff6e3ffb7 <__GI_raise+199>)
+eflags - 0x00000246 ([ PF ZF IF ])
+    cs - 0x00000033 (51)
+    ss - 0x0000002b (43)
+    ds - 0x00000000 (0)
+    es - 0x00000000 (0)
+    fs - 0x00000000 (0)
+    gs - 0x00000000 (0)
+
+Crash context:
+/* Register reference: rcx - 0x00007ffff6e3ffb7 (140737335525303) */
+/* Register reference: rsp - 0x00007fffffffc2c0 (0x7fffffffc2c0) */
+Execution stopped here ==> 0x7ffff6e3ffb7: mov    rcx,QWORD PTR [rsp+0x108]
+
+Crashing thread backtrace:
+#0  0x7ffff6e3ffb7 in __GI_raise (/lib/x86_64-linux-gnu/libc-2.27.so)
+                   at ../sysdeps/unix/sysv/linux/raise.c:51
+
+#1  0x7ffff6e41921 in __GI_abort (/lib/x86_64-linux-gnu/libc-2.27.so)
+                   at abort.c:79
+
+#2  0x0050327b in __sanitizer::Abort() (/tmp/test)
+#3  0x005005a8 in __sanitizer::Die() (/tmp/test)
+#4  0x004e282d in __asan::ReportGenericError(unsigned long, unsigned long, unsigned long, unsigned long, bool, unsigned long, unsigned int, bool) (/tmp/test)
+#5  0x004e3018 in __asan_report_load4 (/tmp/test)
+#6  0x005122d8 in bad_read (/tmp/test)
+               17: void bad_read() {
+               ||: /* Local reference: int [4] arr = {0, 1, 2, 3}; */
+               ||: /* Local reference: int c = 32767; */
+               18: {
+               19:   int arr[] = {0, 1, 2, 3};
+               20:   int c = arr[4];
+               ||:
+               --: }
+               at test.c:20
+
+#7  0x005123ca in main (/tmp/test)
+               29: int main() {
+               ||:
+               31:   fprintf(stderr, "Executing!\n");
+               32:   //crash_fpe();
+               33:   bad_read();
+               ||:
+               --: }
+               at test.c:33
+
+
+ASAN Report:
+=================================================================
+==44757==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7fffffffd2b0 at pc 0x0000005122d8 bp 0x7fffffffd270 sp 0x7fffffffd268
+READ of size 4 at 0x7fffffffd2b0 thread T0
+    #0 0x5122d7 in bad_read /tmp/test.c:20
+    #1 0x5123c9 in main /tmp/test.c:33
+    #2 0x7ffff6e22bf6 in __libc_start_main /build/glibc-S9d2JN/glibc-2.27/csu/../csu/libc-start.c:310
+    #3 0x419d49 in _start ??:?
+
+Address 0x7fffffffd2b0 is located in stack of thread T0 at offset 48 in frame
+    #0 0x5121af in bad_read /tmp/test.c:18
+
+  This frame has 1 object(s):
+    [32, 48) 'arr' (line 19) <== Memory access at offset 48 overflows this variable
+HINT: this may be a false positive if your program uses some custom stack unwind mechanism or swapcontext
+      (longjmp and C++ exceptions *are* supported)
+SUMMARY: AddressSanitizer: stack-buffer-overflow /tmp/test.c:20 in bad_read
+Shadow bytes around the buggy address:
+  0x10007fff7a00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x10007fff7a10: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x10007fff7a20: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x10007fff7a30: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x10007fff7a40: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x10007fff7a50: f1 f1 f1 f1 00 00[f3]f3 00 00 00 00 00 00 00 00
+  0x10007fff7a60: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x10007fff7a70: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x10007fff7a80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x10007fff7a90: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x10007fff7aa0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==44757==ABORTING
+
+Child STDOUT (no output):
+
+Child STDERR (last 25 lines):
+Executing!
+<ASAN Report>

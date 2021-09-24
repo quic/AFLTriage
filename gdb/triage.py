@@ -423,34 +423,24 @@ def get_stop_info():
             signal_name = match.group(1)
             break
 
-    try:
-        signo = int(gdb.parse_and_eval("$_siginfo.si_signo"))
-        sicode = int(gdb.parse_and_eval("$_siginfo.si_code"))
+    # This code could potentially fail if these fields are missing
+    # Since they are really important, prefer to fail
+    signo = int(gdb.parse_and_eval("$_siginfo.si_signo"))
+    sicode = int(gdb.parse_and_eval("$_siginfo.si_code"))
 
-        sinfo =  {"signal": signal_name, "signal_number": signo, "signal_code": sicode}
+    sinfo =  {"signal_name": signal_name, "signal_number": signo, "signal_code": sicode}
 
-        # https://man7.org/linux/man-pages/man2/sigaction.2.html
-        if signal_name in ["SIGSEGV", "SIGILL", "SIGBUS", "SIGFPE", "SIGTRAP"]:
-            sinfo["faulting_address"] = int(gdb.parse_and_eval("$_siginfo._sifields._sigfault.si_addr"))
-    except gdb.error:
-        return None
+    # https://man7.org/linux/man-pages/man2/sigaction.2.html
+    if signal_name in ["SIGSEGV", "SIGILL", "SIGBUS", "SIGFPE", "SIGTRAP"]:
+        sinfo["faulting_address"] = int(gdb.parse_and_eval("$_siginfo._sifields._sigfault.si_addr"))
 
     return sinfo
 
-def backtrace_all():
-    primary_thread = gdb.selected_thread()
-
+def backtrace_all(primary_thread, stop_info):
     gdb_state = {}
 
-    if primary_thread is None:
-        # TODO: return error message
-        return gdb_state
-
-    stop_info = get_stop_info()
-
-    # we must have stop info
-    if not stop_info:
-        return gdb_state
+    assert primary_thread
+    assert stop_info
 
     gdb_state["stop_info"] = stop_info
 
@@ -602,17 +592,24 @@ class GDBTriageCommand(gdb.Command):
         # directly as we don't want to be responsible for possibly messing with its filesystem state
         gdb.execute("set listsize 1", to_string=True)
 
-        # TODO: only do this on i386/x86_64
+        # XXX: only do this on i386/x86_64
         gdb.execute("set disassembly-flavor intel", to_string=True)
 
-        # TODO: undo "set"'s to restore GDB state
+        # XXX: undo "set"'s to restore GDB state
+        primary_thread = gdb.selected_thread()
 
-        bt = backtrace_all()
+        # Target or doesn't exist!
+        if primary_thread is not None:
+            # we must have stop info
+            # TODO: handle other platforms (non Linux) stop info
+            stop_info = get_stop_info()
 
-        if bt:
-            response = {"result": bt}
+            bt = backtrace_all(primary_thread, stop_info)
+
+            # Assumes success. Failures should be handled internally. Otherwise except
+            response = {"result": "SUCCESS", "context": bt}
         else:
-            response = {}
+            response = {"result": "ERROR_TARGET_NOT_RUNNING"}
 
         print(json.dumps(response))
 

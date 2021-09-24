@@ -1,7 +1,7 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
-pub mod sanitizer;
-pub mod text;
-pub mod enriched;
-pub mod raw;
+use crate::gdb_triage::{GdbContextInfo, GdbTriageResult};
+
+pub fn format_raw_report(triage_result: &GdbTriageResult) {
+}

@@ -1,7 +1,7 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
-use crate::gdb_triage::{GdbContextInfo, GdbTriageResult};
+use crate::gdb_triage::{GdbRegister, GdbContextInfo, GdbTriageResult};
 use crate::platform::linux::si_code_to_string;
 use crate::util::elide_size;
 use super::sanitizer::*;
@@ -13,6 +13,7 @@ lazy_static! {
     static ref R_CIDENT: Regex = Regex::new(r#"[_a-zA-Z][_a-zA-Z0-9]{0,30}"#).unwrap();
 }
 
+#[derive(Debug)]
 pub struct CrashReport {
     pub headline: String,
     pub terse_headline: String,
@@ -48,17 +49,17 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
 
     let first_frame = &frames[0];
 
-    let asan = asan_post_process(&triage_result.child.stderr);
+    let sanitizer_report = sanitizer_report_extract(&triage_result.child.stderr);
 
-    let first_interesting_frame = match &asan {
-        Some(asan) => {
+    let first_interesting_frame = match &sanitizer_report {
+        Some(san) => {
             let mut found_frame = None;
 
             // Try to resolve the most interesting sanitizer frame compared to GDB frames
             // Note that sanitizer backtrace addresses and GDB addresses can be off-by-one, hence the ranged check
-            for asan_frame in asan.frames.iter() {
+            for san_frame in san.frames.iter() {
                 for fr in frames.iter() {
-                    if (fr.address + 1) >= *asan_frame && (fr.address - 1) <= *asan_frame {
+                    if (fr.address + 1) >= *san_frame && (fr.address - 1) <= *san_frame {
                         found_frame = Some(fr);
                         break;
                     }
@@ -91,25 +92,26 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
         stop_info.signal_code
     );
 
-    match &asan {
-        Some(asan) => {
-            let op = if asan.operation.is_empty() {
+    match &sanitizer_report {
+        Some(san) => {
+            let op = if san.operation.is_empty() {
+                // TODO: sanitizer name to short name
                 report.terse_headline =
-                    format!("ASAN_{}_{}", asan.stop_reason, report.crashing_function);
+                    format!("ASAN_{}_{}", san.stop_reason, report.crashing_function);
 
                 "".to_string()
             } else {
                 report.terse_headline = format!(
                     "ASAN_{}_{}_{}",
-                    asan.stop_reason, asan.operation, report.crashing_function
+                    san.stop_reason, san.operation, report.crashing_function
                 );
 
-                format!(" after a {}", asan.operation)
+                format!(" after a {}", san.operation)
             };
 
             report.headline = format!(
                 "ASAN detected {} in {}{} leading to {} / {}",
-                asan.stop_reason, report.crashing_function, op, signal_info, signal_code_info,
+                san.stop_reason, report.crashing_function, op, signal_info, signal_code_info,
             );
         }
         None => {
@@ -127,8 +129,8 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
         }
     }
 
-    if let Some(asan) = asan {
-        report.asan_body = asan.body;
+    if let Some(san) = sanitizer_report {
+        report.asan_body = san.body;
     }
 
     let mut major_hash = md5::Context::new();
@@ -326,4 +328,45 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
     report.backtrace = backtrace;
 
     report
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use std::process::ExitStatus;
+    use std::os::unix::process::ExitStatusExt;
+    use crate::gdb_triage::*;
+    use crate::process::ChildResult;
+
+    fn load_test(p: &str) -> String {
+        std::str::from_utf8(
+            &crate::util::read_file_to_bytes(test_path(p).to_str().unwrap()).unwrap()
+        ).unwrap().to_string()
+    }
+
+    fn test_path(p: &str) -> PathBuf {
+        let mut path = PathBuf::from(file!());
+        path.pop();
+        path.push("res");
+        path.push("test_report_text");
+        path.push(p);
+        path
+    }
+
+    #[test]
+    fn test_text_report() {
+        let json: GdbJsonResult = serde_json::from_str(&load_test("asan_stack_bof.rawjson")).unwrap();
+        let triage = GdbTriageResult {
+            response: json,
+            child: ChildResult {
+                stdout: "".into(),
+                stderr: "".into(),
+                status: ExitStatus::from_raw(0),
+            }
+        };
+
+        let report = format_text_report(&triage);
+        //println!("{:?}", report);
+    }
 }

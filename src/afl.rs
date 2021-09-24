@@ -175,12 +175,6 @@ mod test {
     use std::path::PathBuf;
     use super::*;
 
-    fn load_test(p: &Path) -> String {
-        std::str::from_utf8(
-            &crate::util::read_file_to_bytes(p.to_str().unwrap()).unwrap()
-        ).unwrap().to_string()
-    }
-
     fn test_path(p: &str) -> PathBuf {
         let mut path = PathBuf::from(file!());
         path.pop();

@@ -116,12 +116,14 @@ pub struct GdbThread {
     pub tid: i32,
     pub backtrace: Vec<GdbFrameInfo>,
     pub current_instruction: Option<String>,
+    /// Registers are passed in the GDB defined order
     pub registers: Option<Vec<GdbRegister>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GdbRegister {
     pub name: String,
+    // TODO: what about SIMD registers larger than 64 bits?
     pub value: u64,
     pub pretty_value: String,
     pub r#type: String,
@@ -160,7 +162,7 @@ pub struct GdbJsonResult {
 #[derive(Debug)]
 pub struct GdbTriageResult {
     pub response: GdbJsonResult,
-    pub child: ChildResult,
+    pub child: ChildResult, // TODO: don't pass exit code as its for gdb
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
