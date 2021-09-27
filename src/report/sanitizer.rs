@@ -3,23 +3,31 @@
 // SPDX-License-Identifier: BSD-3-Clause
 use serde::{Deserialize, Serialize};
 use regex::Regex;
+use std::collections::HashMap;
+use std::array::IntoIter;
+use std::iter::FromIterator;
 
 lazy_static! {
-    static ref R_ASAN_HEADLINE: Regex = Regex::new(
+    static ref R_SANITIZER_REPORT: Regex = Regex::new(
         r#"(?x)
         ([=]+[\r\n]+)?
-        (?P<pid>=+[0-9]+=+)\s*ERROR:\s*AddressSanitizer:\s*
+        (?P<pid>=+[0-9]+=+)\s*ERROR:\s*(?P<san>AddressSanitizer):\s*
         (attempting\s)?(?P<reason>[-_A-Za-z0-9]+)[^\r\n]*[\r\n]+
         (?P<operation>[-_A-Za-z0-9]+)?
         "#
     )
     .unwrap();
-    static ref R_ASAN_FRAME: Regex = Regex::new(r#"#(?P<num>[0-9]+)\s+(?P<addr>0x[a-fA-F0-9]+)"#).unwrap();
+    static ref R_SANITIZER_REPORT_FRAME: Regex = Regex::new(r#"#(?P<num>[0-9]+)\s+(?P<addr>0x[a-fA-F0-9]+)"#).unwrap();
+
+    static ref SANITIZER_SHORT: HashMap<&'static str, &'static str> = HashMap::<_, _>::from_iter(IntoIter::new([
+            ("AddressSanitizer", "ASAN"),
+    ]));
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct SanitizerReport {
     pub sanitizer: String,
+    pub sanitizer_short: String,
     pub stop_reason: String,
     pub operation: String,
     pub frames: Vec<u64>,
@@ -27,27 +35,30 @@ pub struct SanitizerReport {
 }
 
 // TODO: support multiple sanitizer reports in successsion
+// TODO: support more sanitizers
 pub fn sanitizer_report_extract(input: &str) -> Option<SanitizerReport> {
     // find the NEWEST sanitizer headline
     // regex doesn't support finding in reverse so we go at it forward
-    let asan_match = R_ASAN_HEADLINE.captures_iter(input).last();
+    let report_match = R_SANITIZER_REPORT.captures_iter(input).last();
 
-    // cut out the ASAN body from the child's output
-    let asan_headline = asan_match?;
-    let asan_start_marker = asan_headline.name("pid").unwrap().as_str();
+    // cut out the report body from the child's output
+    let report_headline = report_match?;
+    let report_sanitizer = report_headline.name("san").unwrap().as_str();
+    let report_sanitizer_short = SANITIZER_SHORT.get(report_sanitizer).unwrap_or(&"");
+    let report_start_marker = report_headline.name("pid").unwrap().as_str();
 
-    // find the bounds of the ASAN print to capture it raw
-    let asan_raw_headline = asan_headline.get(0).unwrap();
-    let asan_start_pos = asan_raw_headline.start();
+    // find the bounds of the report print to capture it raw
+    let report_raw_headline = report_headline.get(0).unwrap();
+    let report_start_pos = report_raw_headline.start();
 
-    let asan_body_large = &input[asan_headline.name("pid").unwrap().start()..];
-    let next_pos = asan_body_large.lines().take_while(|x| x.find(asan_start_marker).is_some()).map(|x| x.len()+1).sum::<usize>() + asan_headline.name("pid").unwrap().start();
+    let report_body_large = &input[report_headline.name("pid").unwrap().start()..];
+    let next_pos = report_body_large.lines().take_while(|x| x.find(report_start_marker).is_some()).map(|x| x.len()+1).sum::<usize>() + report_headline.name("pid").unwrap().start();
 
-    // This is not perfectly reliable. For instance, if ASAN_OPTIONS="halt_on_error=0"
+    // This is not perfectly reliable. For instance, if report_OPTIONS="halt_on_error=0"
     // then there will be no terminating ==1234==ABORTING token.
     // In that case the only safe option is to eat the rest of the string
     // Sanitizers really need machine readable output
-    let end_pos: usize = if let Some(pos_rel) = &input[next_pos..].find(asan_start_marker) {
+    let end_pos: usize = if let Some(pos_rel) = &input[next_pos..].find(report_start_marker) {
         let pos = pos_rel + next_pos;
         let skip_len = &input[pos..].find("\n").unwrap_or(0);
         pos + skip_len
@@ -60,15 +71,15 @@ pub fn sanitizer_report_extract(input: &str) -> Option<SanitizerReport> {
         next_pos
     };
 
-    let asan_body = &input[asan_start_pos..end_pos];
+    let report_body = &input[report_start_pos..end_pos];
 
-    let stop_reason = asan_headline.name("reason").unwrap().as_str().to_string();
+    let stop_reason = report_headline.name("reason").unwrap().as_str().to_string();
 
-    // Try and find the frame where ASAN was triggered from
+    // Try and find the frame where report was triggered from
     // That way we can print a better info message
-    let mut asan_frames = Vec::new();
+    let mut report_frames = Vec::new();
 
-    for (i, frame) in R_ASAN_FRAME.captures_iter(asan_body).enumerate() {
+    for (i, frame) in R_SANITIZER_REPORT_FRAME.captures_iter(report_body).enumerate() {
         let id = u64::from_str_radix(&(frame.name("num").unwrap().as_str()), 10).unwrap();
         let addr = u64::from_str_radix(&(frame.name("addr").unwrap().as_str())[2..], 16).unwrap();
 
@@ -76,10 +87,10 @@ pub fn sanitizer_report_extract(input: &str) -> Option<SanitizerReport> {
             break
         }
 
-        asan_frames.push(addr);
+        report_frames.push(addr);
     }
 
-    let operation: &str = match asan_headline.name("operation") {
+    let operation: &str = match report_headline.name("operation") {
         Some(op) => {
             if stop_reason == "SEGV" {
                 ""
@@ -91,11 +102,12 @@ pub fn sanitizer_report_extract(input: &str) -> Option<SanitizerReport> {
     };
 
     Some(SanitizerReport {
-        sanitizer: "AddressSanitizer".into(), // TODO: support more sanitizers
+        sanitizer: report_sanitizer.into(),
+        sanitizer_short: report_sanitizer_short.to_string(),
         stop_reason,
         operation: operation.to_string(),
-        frames: asan_frames,
-        body: asan_body.trim_end().to_string(),
+        frames: report_frames,
+        body: report_body.trim_end().to_string(),
     })
 }
 
@@ -193,6 +205,7 @@ mod test {
         assert_eq!(sanitizer_report_extract("==1==ERROR: AddressSanitizer: CODE\n").unwrap(),
             SanitizerReport {
                 sanitizer:  "AddressSanitizer".into(),
+                sanitizer_short: "ASAN".into(),
                 stop_reason: "CODE".into(),
                 operation: "".into(),
                 frames: vec![],
