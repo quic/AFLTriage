@@ -760,6 +760,16 @@ fn main_wrapper() -> i32 {
                 }
             }
             TriageResult::Crash(triage) => {
+                let options = report::enriched::ReportOptions {
+                    child_output_lines,
+                    show_child_output: child_output,
+                };
+
+                let report2 = report::enriched::enrich_triage_info(&options, &triage);
+                let rendered = serde_json::to_string_pretty(&report2.unwrap()).unwrap();
+
+                write_message(rendered, Some(path));
+
                 let report = report::text::format_text_report(&triage);
                 state.crashed += 1;
 

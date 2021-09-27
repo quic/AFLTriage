@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use regex::Regex;
 use std::collections::HashMap;
 use crate::gdb_triage::*;
+use crate::util;
 use crate::platform::linux::si_code_to_string;
 
 lazy_static! {
@@ -52,6 +53,7 @@ pub struct EnrichedInstructionContext {
     /// The raw instruction string taken from the debugging backend
     pub insn: String,
     /// AFLTriage's architecture independent guess as to which registers were referenced
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub referenced_regs: Option<Vec<Rc<GdbRegister>>>,
     // TODO: support memory references?
 }
@@ -65,6 +67,7 @@ pub struct EnrichedSourceContext {
     /// The raw source code
     pub source: String,
     /// AFLTriage's language independent guess as to which variables were referenced
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub references: Option<Vec<Rc<GdbVariable>>>,
 }
 
@@ -74,8 +77,10 @@ pub struct EnrichedThreadInfo {
     pub frames: Vec<EnrichedFrameInfo>,
     /// Registers may be collected during debugger backtracing
     /// Order is based on the debugging backend
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub regs: Option<Vec<Rc<GdbRegister>>>,
     /// One or more instructions that were collected for this thread
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub instruction_context: Option<Vec<EnrichedInstructionContext>>,
 }
 
@@ -83,8 +88,6 @@ pub struct EnrichedThreadInfo {
 pub struct EnrichedTargetOutput {
     pub stdout: String,
     pub stderr: String,
-    /// If a limit was placed on the lines emitted
-    pub max_lines: Option<usize>,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -101,8 +104,10 @@ pub struct EnrichedFrameInfo {
     /// An opinionated, uniquely identifiable (within a process) formatting of module and address
     pub module_address: String,
     /// Symbol information for the frame's function, if available
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub symbol: Option<Rc<GdbSymbol>>,
     /// One or more lines of source that were collected for this frame.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source_context: Option<Vec<EnrichedSourceContext>>,
 }
 
@@ -119,6 +124,7 @@ pub struct EnrichedLinuxStopInfo {
     /// The corresponding number of the signal code (si_code). This can be platform dependent
     pub signal_code: i32,
     /// An optional faulting address (sigfault.si_addr)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub faulting_address: Option<AddressView>,
 }
 
@@ -129,7 +135,8 @@ pub struct EnrichedTriageInfo {
     /// A very terse summary without whitespace
     pub terse_summary: String,
     /// Information on the crash's bucket information, if any
-    pub bucket: Option<CrashBucketInfo>,
+    //#[serde(skip_serializing_if = "Option::is_none")]
+    //pub bucket: Option<CrashBucketInfo>,
     /// Platform dependent information as to why the target stopped
     // TODO: make this agnostic to debugging backend/platform
     pub stop_info: EnrichedLinuxStopInfo,
@@ -145,14 +152,16 @@ pub struct EnrichedTriageInfo {
     pub faulting_thread: EnrichedThreadInfo,
     /// Sanitizer reports extracted from the target output in reverse order (most recent first)
     /// Currently only the last report is extracted.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sanitizer_reports: Option<Vec<SanitizerReport>>,
     /// Raw output from the target, if enabled
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub target_output: Option<EnrichedTargetOutput>,
 }
 
 pub struct ReportOptions {
-    output_lines: usize,
-    bucket_strategy: String,
+    pub show_child_output: bool,
+    pub child_output_lines: usize,
 }
 
 pub fn enrich_triage_info(opt: &ReportOptions, triage_result: &GdbTriageResult) -> Result<EnrichedTriageInfo, &'static str> {
@@ -165,13 +174,12 @@ pub fn enrich_triage_info(opt: &ReportOptions, triage_result: &GdbTriageResult) 
         return Err("Backtrace is empty!")
     }
 
-    // bucketing is performed after
-    let bucket = None;
-
     let stop_info = build_stop_info(arch_info, &ctx_info.stop_info);
 
     let faulting_thread = build_thread_info(arch_info, primary_thread);
     let sanitizer_reports = sanitizer_report_extract(&triage_result.child.stderr).map(|r| vec![r]);
+    let faulting_sanitizer_report = sanitizer_reports.as_ref()
+        .map(|reports| reports.get(0)).flatten();
 
     let faulting_frame_idx = sanitizer_reports.as_ref()
         .map(|s| find_faulting_frame(&faulting_thread, s)).unwrap_or(0);
@@ -179,15 +187,56 @@ pub fn enrich_triage_info(opt: &ReportOptions, triage_result: &GdbTriageResult) 
     let faulting_function = faulting_frame.symbol.as_ref()
         .map(|s| s.format()).unwrap_or(faulting_frame.address.f.to_string());
 
-    let target_output = None;
+    let target_output = if opt.show_child_output {
+        Some(build_target_output(opt, &triage_result.child, &sanitizer_reports))
+    } else {
+        None
+    };
 
-    let summary = "".into();
-    let terse_summary = "".into();
+    let mut summary = "".into();
+    let mut terse_summary = "".into();
+
+    // Build sanitizer report
+    match &faulting_sanitizer_report {
+        Some(san) => {
+            let op = if san.operation.is_empty() {
+                // TODO: sanitizer name to short name
+                terse_summary =
+                    format!("ASAN_{}_{}", san.stop_reason, faulting_function);
+
+                "".to_string()
+            } else {
+                terse_summary = format!(
+                    "ASAN_{}_{}_{}",
+                    san.stop_reason, san.operation, faulting_function
+                );
+
+                format!(" after a {}", san.operation)
+            };
+
+            summary = format!(
+                "ASAN detected {} in {}{} leading to {}",
+                san.stop_reason, faulting_function, op, stop_info.summary
+            );
+        }
+        None => {
+            let fault_address = match &stop_info.faulting_address {
+                Some(addr) => format!(" due to a fault at or near {}", addr.f),
+                None => "".to_string(),
+            };
+
+            summary = format!(
+                "CRASH detected in {}{} leading to {}",
+                faulting_function, fault_address, stop_info.summary,
+            );
+
+            terse_summary = format!("{}_{}", stop_info.signal_name, faulting_function);
+        }
+    }
 
     Ok(EnrichedTriageInfo {
         summary,
         terse_summary,
-        bucket,
         stop_info,
         faulting_frame_idx,
         faulting_function,
@@ -195,6 +244,36 @@ pub fn enrich_triage_info(opt: &ReportOptions, triage_result: &GdbTriageResult) 
         sanitizer_reports,
         target_output,
     })
+}
+
+fn build_target_output(opt: &ReportOptions, child: &crate::process::ChildResult, sanitizer_reports: &Option<Vec<SanitizerReport>>) -> EnrichedTargetOutput {
+    let stderr = if let Some(ref reports) = sanitizer_reports {
+        // TODO: multiple reports
+        if let Some(report) = reports.get(0) {
+            child.stderr.replace(&report.body, &format!("<Replaced {} Report>", report.sanitizer))
+        } else {
+            child.stderr.to_string()
+        }
+    } else {
+        child.stderr.to_string()
+    };
+
+    let stdout = if opt.child_output_lines > 0 {
+        util::tail_string(&child.stdout, opt.child_output_lines).join("\n")
+    } else {
+        child.stdout.to_string()
+    };
+
+    let stderr = if opt.child_output_lines > 0 {
+        util::tail_string(&stderr, opt.child_output_lines).join("\n")
+    } else {
+        child.stdout.to_string()
+    };
+
+    EnrichedTargetOutput {
+        stdout,
+        stderr,
+    }
 }
 
 fn find_faulting_frame(thread: &EnrichedThreadInfo, sanitizers: &Vec<SanitizerReport>) -> usize {
@@ -377,8 +456,8 @@ mod test {
         };
 
         let opt = ReportOptions {
-            output_lines: 25,
-            bucket_strategy: "default".into(),
+            child_output_lines: 25,
+            show_child_output: true,
         };
 
         let report = enrich_triage_info(&opt, &triage).unwrap();

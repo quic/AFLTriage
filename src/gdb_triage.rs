@@ -12,14 +12,23 @@ const INTERNAL_TRIAGE_SCRIPT: &[u8] = include_bytes!("../gdb/triage.py");
 
 #[derive(Debug, Serialize, PartialEq, Deserialize)]
 pub struct GdbSymbol {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub function_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub function_line: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub mangled_function_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub function_signature: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub callsite: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<Rc<GdbVariable>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub locals: Option<Vec<Rc<GdbVariable>>>,
 }
 
@@ -109,6 +118,7 @@ pub struct GdbFrameInfo {
     pub relative_address: u64,
     pub module: String,
     pub module_address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub symbol: Option<Rc<GdbSymbol>>,
 }
 
@@ -116,8 +126,10 @@ pub struct GdbFrameInfo {
 pub struct GdbThread {
     pub tid: i32,
     pub backtrace: Vec<GdbFrameInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub current_instruction: Option<String>,
     /// Registers are passed in the GDB defined order
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub registers: Option<Vec<Rc<GdbRegister>>>,
 }
 
@@ -137,6 +149,7 @@ pub struct GdbStopInfo {
     pub signal_name: String,
     pub signal_number: i32,            // si_signo
     pub signal_code: i32,              // si_code
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub faulting_address: Option<u64>, // sigfault.si_addr
 }
 
@@ -151,6 +164,7 @@ pub struct GdbContextInfo {
     pub stop_info: GdbStopInfo,
     pub arch_info: GdbArchInfo,
     pub primary_thread: GdbThread,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub other_threads: Option<Vec<GdbThread>>,
 }
 
@@ -164,6 +178,7 @@ pub enum GdbResultCode {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GdbJsonResult {
     pub result: GdbResultCode,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<GdbContextInfo>,
 }
 
