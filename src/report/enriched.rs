@@ -171,10 +171,13 @@ pub fn enrich_triage_info(opt: &ReportOptions, triage_result: &GdbTriageResult) 
     let stop_info = build_stop_info(arch_info, &ctx_info.stop_info);
 
     let faulting_thread = build_thread_info(arch_info, primary_thread);
-    let faulting_function = "".into();
+    let sanitizer_reports = sanitizer_report_extract(&triage_result.child.stderr).map(|r| vec![r]);
 
-    let faulting_frame_idx = 0;
-    let sanitizer_reports = None;
+    let faulting_frame_idx = sanitizer_reports.as_ref()
+        .map(|s| find_faulting_frame(&faulting_thread, s)).unwrap_or(0);
+    let faulting_frame = &faulting_thread.frames[faulting_frame_idx];
+    let faulting_function = faulting_frame.symbol.as_ref()
+        .map(|s| s.format()).unwrap_or(faulting_frame.address.f.to_string());
 
     let target_output = None;
 
@@ -192,6 +195,20 @@ pub fn enrich_triage_info(opt: &ReportOptions, triage_result: &GdbTriageResult) 
         sanitizer_reports,
         target_output,
     })
+}
+
+fn find_faulting_frame(thread: &EnrichedThreadInfo, sanitizers: &Vec<SanitizerReport>) -> usize {
+    for san in sanitizers.iter() {
+        for san_frame in san.frames.iter() {
+            for (fr_id, fr) in thread.frames.iter().enumerate() {
+                if (fr.address.r + 1) >= *san_frame && (fr.address.r - 1) <= *san_frame {
+                    return fr_id;
+                }
+            }
+        }
+    }
+
+    0
 }
 
 fn build_thread_info(arch_info: &GdbArchInfo, thread: &GdbThread) -> EnrichedThreadInfo {
