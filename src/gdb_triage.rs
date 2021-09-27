@@ -418,11 +418,13 @@ impl GdbTriager {
         // TODO: memory limit?
         #[rustfmt::rustfmt_skip]
         let gdb_args = vec_of_strings!(
-            "--batch", "--nx",
+            "--nx", "--batch",
             // FIXME: index cache is a bit unreliable on earlier GDB versions
             //"-iex", "set index-cache on",
             //"-iex", "set index-cache directory gdb_cache",
+            "-iex", "set print inferior-events off",
             // write the marker to both stdout and stderr as they are not interleaved
+            // Markers will not print if logging is to /dev/null
             "-ex", MARKER_CHILD_OUTPUT.gdb_start,
             "-ex", "set logging file /dev/null",
             "-ex", "set logging redirect on",
