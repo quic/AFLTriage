@@ -7,8 +7,13 @@ use std::rc::Rc;
 use super::sanitizer::*;
 use serde::{Deserialize, Serialize};
 use regex::Regex;
+use std::collections::HashMap;
 use crate::gdb_triage::*;
 use crate::platform::linux::si_code_to_string;
+
+lazy_static! {
+    static ref R_CIDENT: Regex = Regex::new(r#"[_a-zA-Z][_a-zA-Z0-9]{0,30}"#).unwrap();
+}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct CrashBucketInfo {
@@ -203,10 +208,30 @@ fn build_thread_info(arch_info: &GdbArchInfo, thread: &GdbThread) -> EnrichedThr
     }
 }
 
-//fn build_reference_list(needles: Vec<&str>, haystack: Vec<&str>) ->
+fn build_reference_list<T>(needles: &HashMap<&str, Rc<T>>, haystack: Vec<&str>) -> Vec<Rc<T>> {
+    let mut found: Vec<Rc<T>> = vec![];
+    let mut seen: HashSet<&str> = HashSet::new();
+
+    for line in haystack {
+        for ident in R_CIDENT.find_iter(line) {
+            let name = ident.as_str();
+            if needles.contains_key(name) && !seen.contains(name) {
+                found.push(Rc::clone(needles.get(name).unwrap()));
+                seen.insert(name);
+            }
+        }
+    }
+
+    found
+}
 
 fn build_instruction_context(arch_info: &GdbArchInfo, regs: &Option<Vec<Rc<GdbRegister>>>, insn: String, addr: u64) -> EnrichedInstructionContext {
-    let referenced_regs = None;
+    let referenced_regs = if let Some(regs) = regs {
+        let reg_map : HashMap<_, _> = regs.iter().map(|v| (v.name.as_str(), Rc::clone(v))).collect();
+        Some(build_reference_list(&reg_map, vec![&insn]))
+    } else {
+        None
+    };
 
     EnrichedInstructionContext {
         address: AddressView::new(addr, arch_info.address_bits),
@@ -226,10 +251,20 @@ fn build_source_context(arch_info: &GdbArchInfo, symbol: &Rc<GdbSymbol>) -> Opti
     let lines = symbol.callsite.as_ref().unwrap();
     let file = symbol.file.as_ref().unwrap();
     let start_line = symbol.line.unwrap();
+    let locals_map: Option<HashMap<&str, _>> = symbol.locals.as_ref()
+        .map(|vars| vars.iter().map(|v| (v.name.as_str(), Rc::clone(v))).collect());
+    let args_map: Option<HashMap<&str, _>> = symbol.args.as_ref()
+        .map(|vars| vars.iter().map(|v| (v.name.as_str(), Rc::clone(v))).collect());
 
     for (i, code) in lines.iter().enumerate() {
         let line_no = (start_line as usize) - lines.len() + i + 1;
-        let references = None;
+        let referenced_locals = locals_map.as_ref().map(|m| build_reference_list(m, vec![&code]));
+        let referenced_args = args_map.as_ref().map(|m| build_reference_list(m, vec![&code]));
+
+        let references = match (referenced_locals, referenced_args) {
+            (Some(l), Some(a)) => Some(l.into_iter().chain(a).collect()),
+            (l, a) => l.or(a),
+        };
 
         ctx.push(EnrichedSourceContext {
             file: file.to_string(),
@@ -247,7 +282,7 @@ fn build_frame_info(arch_info: &GdbArchInfo, fr: &GdbFrameInfo) -> EnrichedFrame
     let relative_address = AddressView::new(fr.relative_address, arch_info.address_bits);
     let module = fr.module.to_string();
     let module_address = fr.module_address.to_string();
-    // TODO: only include symbols necessary
+    // TODO: only include necessary fields instead of duplicating them
     let symbol = fr.symbol.as_ref().map(|d| Rc::clone(d));
     let srcctx = symbol.as_ref().map(|s| build_source_context(arch_info, s)).flatten();
 
