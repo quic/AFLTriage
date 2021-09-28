@@ -5,6 +5,20 @@
   ],
   "testcase": "test.c",
   "debugger": "gdb",
+  "bucket": {
+    "inputs": [
+      "/lib/x86_64-linux-gnu/libc-2.27.so+0x3efb7",
+      "/lib/x86_64-linux-gnu/libc-2.27.so+0x40921",
+      "/tmp/test (.text)+0xe95eb",
+      "/tmp/test (.text)+0xe6918",
+      "/tmp/test (.text)+0xc8b9d",
+      "/tmp/test (.text)+0xc9388",
+      "test.c:20",
+      "test.c:33"
+    ],
+    "strategy": "afltriage",
+    "strategy_result": "e7a73ec00e0f0d990e5a753f8f942622"
+  },
   "report_options": {
     "show_child_output": true,
     "child_output_lines": 25

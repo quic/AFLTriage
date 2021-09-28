@@ -18,16 +18,6 @@ lazy_static! {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct CrashBucketInfo {
-    /// What is the stringified output from the bucketing function
-    pub strategy_result: String,
-    /// What hashing or other function was used to identify a crash
-    pub bucket_strategy: String,
-    /// What stringified inputs were used as input to the bucketing function
-    pub inputs: Vec<String>,
-}
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct AddressView {
     /// The raw numbered value. Should be enough size to hold addresses for the architecture
     pub r: u64,
@@ -135,9 +125,6 @@ pub struct EnrichedTriageInfo {
     pub summary: String,
     /// A very terse summary without whitespace
     pub terse_summary: String,
-    /// Information on the crash's bucket information, if any
-    //#[serde(skip_serializing_if = "Option::is_none")]
-    //pub bucket: Option<CrashBucketInfo>,
     /// Platform dependent information as to why the target stopped
     // TODO: make this agnostic to debugging backend/platform
     pub stop_info: EnrichedLinuxStopInfo,
@@ -412,51 +399,5 @@ fn build_stop_info(arch: &GdbArchInfo, stop_info: &GdbStopInfo) -> EnrichedLinux
         signal_code_name: si_code_name,
         signal_code: stop_info.signal_code,
         faulting_address,
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use std::path::{Path, PathBuf};
-    use std::process::ExitStatus;
-    use std::os::unix::process::ExitStatusExt;
-    use crate::gdb_triage::*;
-    use crate::process::ChildResult;
-
-    fn load_test(p: &str) -> String {
-        std::str::from_utf8(
-            &crate::util::read_file_to_bytes(test_path(p).to_str().unwrap()).unwrap()
-        ).unwrap().to_string()
-    }
-
-    fn test_path(p: &str) -> PathBuf {
-        let mut path = PathBuf::from(file!());
-        path.pop();
-        path.push("res");
-        path.push("test_report_text");
-        path.push(p);
-        path
-    }
-
-    #[test]
-    fn test_enriched_parse() {
-        let json: GdbJsonResult = serde_json::from_str(&load_test("asan_stack_bof.rawjson")).unwrap();
-        let triage = GdbTriageResult {
-            response: json,
-            child: ChildResult {
-                stdout: "".into(),
-                stderr: "".into(),
-                status: ExitStatus::from_raw(0),
-            }
-        };
-
-        let opt = ReportOptions {
-            child_output_lines: 25,
-            show_child_output: true,
-        };
-
-        let report = enrich_triage_info(&opt, &triage).unwrap();
-        println!("{:#?}", report);
     }
 }

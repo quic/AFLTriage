@@ -453,12 +453,12 @@ fn build_text_report(einfo: &EnrichedTriageInfo, envelope: &ReportEnvelope) -> T
     let mut crash_context = TextReportSection::new("Crash context".into());
 
     let mut backtrace = TextReportSection::new("Crashing thread backtrace".into());
-    let mut sanitizer_report = TextReportSection::new("ASAN Report".into()); // TODO asan
+    let mut sanitizer_report = TextReportSection::new("Sanitizer Report".into());
     let mut child_output = TextReportSection::new("".into());
 
     header.add_line(format!(
         "Summary: {}\nCommand line: {}\nTestcase: {}\nStack hash: {}",
-        einfo.summary, envelope.command_line.join(" "), envelope.testcase, "e7a73ec00e0f0d990e5a753f8f942622", // TODO
+        einfo.summary, envelope.command_line.join(" "), envelope.testcase, envelope.bucket.strategy_result,
     ));
 
     build_register_info(einfo, &mut register_info);
@@ -470,6 +470,13 @@ fn build_text_report(einfo: &EnrichedTriageInfo, envelope: &ReportEnvelope) -> T
         if reports.len() > 0 {
             let san_report = &reports[0];
             if !san_report.body.is_empty() {
+                // adjust the section title
+                let san_name = if san_report.sanitizer_short.is_empty() {
+                    &san_report.sanitizer
+                } else {
+                    &san_report.sanitizer_short
+                };
+                sanitizer_report.section_name = format!("{} Report", san_name);
                 sanitizer_report.add_line(san_report.body.to_string());
             }
         }
@@ -517,7 +524,6 @@ fn build_backtrace(einfo: &EnrichedTriageInfo, backtrace: &mut TextReportSection
         }
 
         for line in &ctx {
-            println!("{}", frame_pad);
             backtrace.add_line(format!("{:pad$}{}", "", line, pad = frame_pad));
         }
 
@@ -684,7 +690,9 @@ fn build_instruction_context(einfo: &EnrichedTriageInfo, crash_context: &mut Tex
     }
 }
 
-fn format_text_report_new(sections: TextReportSections) -> String {
+pub fn format_text_report_new(einfo: &EnrichedTriageInfo, envelope: &ReportEnvelope) -> String {
+    let sections = build_text_report(einfo, envelope);
+
     let mut report: String = String::new();
 
     report += &sections.header.format();
@@ -750,10 +758,8 @@ mod test {
         let envelope_s: ReportEnvelope = serde_json::from_value(envelope).unwrap();
 
         let text_golden: String = load_test("asan_stack_bof.txt");
-        let text_new: String = format_text_report_new(build_text_report(&report, &envelope_s));
+        let text_new: String = format_text_report_new(&report, &envelope_s);
 
-        println!("{}", text_new);
-        // compare lines
         assert_lines_eq(&text_new, &text_golden);
     }
 }

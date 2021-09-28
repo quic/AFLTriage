@@ -26,9 +26,11 @@ pub mod platform;
 pub mod process;
 pub mod report;
 pub mod util;
+pub mod bucket;
 
 use gdb_triage::{GdbTriageError, GdbTriageResult, GdbTriager};
 use process::ChildResult;
+use bucket::{CrashBucketStrategy, CrashBucketInfo};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -149,12 +151,12 @@ enum TriageResult {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct ReportEnvelope {
+pub struct ReportEnvelope {
     command_line: Vec<String>,
     testcase: String,
     debugger: String,
     //env: Vec<String>,
-    //bucket: CrashBucketInfo,
+    bucket: CrashBucketInfo,
     report_options: ReportOptions,
 }
 
@@ -768,33 +770,33 @@ fn main_wrapper() -> i32 {
                     show_child_output: child_output,
                 };
 
-                let report2 = report::enriched::enrich_triage_info(&options, &triage).unwrap();
+                let etriage = report::enriched::enrich_triage_info(&options, &triage).unwrap();
 
-                let wrapper = ReportEnvelope {
+                let envelope = ReportEnvelope {
                     command_line: binary_args.iter().map(|x| x.to_string()).collect(),
                     testcase: path.to_string(),
                     debugger: "gdb".into(), // TODO
+                    bucket: bucket::bucket_crash(CrashBucketStrategy::afltriage, &etriage), // TODO
                     report_options: options.clone(),
-                    //report: serde_json::to_value(&report2).unwrap(),
                 };
 
-                let report_val = serde_json::to_value(&report2).unwrap();
-                let mut wrapper_val = serde_json::to_value(&wrapper).unwrap();
-                wrapper_val.as_object_mut().unwrap().insert("report".into(), report_val);
+                //let report_val = serde_json::to_value(&etriage).unwrap();
+                //let mut wrapper_val = serde_json::to_value(&envelope).unwrap();
+                //wrapper_val.as_object_mut().unwrap().insert("report".into(), report_val);
+                //let rendered = serde_json::to_string_pretty(&wrapper_val).unwrap();
+                //write_message(rendered, Some(path));
 
-                let rendered = serde_json::to_string_pretty(&wrapper_val).unwrap();
-
-                write_message(rendered, Some(path));
-
-                let report = report::text::format_text_report(&triage);
+                //let report = report::text::format_text_report(&triage);
                 state.crashed += 1;
+                let bucket = &envelope.bucket.strategy_result;
 
-                if !state.crash_signature.contains(&report.stackhash) {
-                    write_message(format!("{}", report.headline), Some(path));
+                if !state.crash_signature.contains(bucket) {
+                    write_message(format!("{}", etriage.summary), Some(path));
 
-                    state.crash_signature.insert(report.stackhash.to_string());
+                    state.crash_signature.insert(bucket.to_string());
 
-                    let text_report = report::text::format_text_report_full(&options, path, &binary_cmdline, &report, &triage);
+                    let text_report = report::text::format_text_report_new(&etriage, &envelope);
+                    //let text_report = report::text::format_text_report_full(&options, path, &binary_cmdline, &report, &triage);
 
                     if output_dir.is_none() {
                         write_message(format!(
@@ -805,8 +807,8 @@ fn main_wrapper() -> i32 {
                         let output_dir = output_dir.as_ref().unwrap();
                         let report_filename = format!(
                             "afltriage_{}_{}.txt",
-                            util::sanitize(&report.terse_headline),
-                            &report.stackhash[..8]
+                            util::sanitize(&etriage.terse_summary),
+                            util::sanitize(bucket),
                         );
 
                         if let Err(e) =
@@ -818,7 +820,7 @@ fn main_wrapper() -> i32 {
                         }
                     }
                 } else {
-                    write_message(format!("{}", report.headline), Some(path));
+                    write_message(format!("{}", etriage.summary), Some(path));
                 }
             }
             TriageResult::Error(gdb_error) => {
