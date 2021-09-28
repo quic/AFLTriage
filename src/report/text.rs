@@ -39,7 +39,10 @@ impl TextReportSection {
         self.entries.push(TextReportSectionEntry::Section(section));
     }
 
-    // todo indent
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+
     fn format(&self) -> String {
         let mut out = String::new();
         if !self.section_name.is_empty() {
@@ -70,22 +73,26 @@ struct TextReportSections {
     child_output: TextReportSection,
 }
 
-pub fn format_text_report_new(einfo: &EnrichedTriageInfo, envelope: &ReportEnvelope) -> String {
+pub fn format_text_report(einfo: &EnrichedTriageInfo, envelope: &ReportEnvelope) -> String {
     let sections = build_text_report(einfo, envelope);
 
     let mut report: String = String::new();
 
-    report += &sections.header.format();
-    report += "\n";
-    report += &sections.register_info.format();
-    report += "\n";
-    report += &sections.crash_context.format();
-    report += "\n";
-    report += &sections.backtrace.format();
-    report += "\n";
-    report += &sections.sanitizer_report.format();
-    report += "\n";
-    report += &sections.child_output.format();
+    let sec_order = vec![
+        &sections.header,
+        &sections.backtrace,
+        &sections.sanitizer_report,
+        &sections.crash_context,
+        &sections.register_info,
+        &sections.child_output,
+    ];
+
+    for sec in sec_order {
+        if sec.len() > 0 {
+            report += &sec.format().trim();
+            report += "\n\n";
+        }
+    }
 
     // remove all but last newline
     report = report.trim().to_string();
@@ -377,8 +384,8 @@ mod test {
         let envelope_s: ReportEnvelope = serde_json::from_value(envelope).unwrap();
 
         let text_golden: String = load_test("asan_stack_bof.txt");
-        let text_new: String = format_text_report_new(&report, &envelope_s);
+        let text: String = format_text_report(&report, &envelope_s);
 
-        assert_lines_eq(&text_new, &text_golden);
+        assert_lines_eq(&text, &text_golden);
     }
 }

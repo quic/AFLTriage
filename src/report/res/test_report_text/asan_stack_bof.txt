@@ -3,37 +3,6 @@ Command line: ./test @@
 Testcase: test.c
 Stack hash: e7a73ec00e0f0d990e5a753f8f942622
 
-Register info:
-   rax - 0x0000000000000000 (0)
-   rbx - 0x00000000013ad438 (20632632)
-   rcx - 0x00007ffff6e3ffb7 (140737335525303)
-   rdx - 0x0000000000000000 (0)
-   rsi - 0x00007fffffffc2c0 (140737488339648)
-   rdi - 0x0000000000000002 (2)
-   rbp - 0x00000000013ad438 (0x13ad438 <__sanitizer::CheckFailed(char const*, int, char const*, unsigned long long, unsigned long long)::num_calls>)
-   rsp - 0x00007fffffffc2c0 (0x7fffffffc2c0)
-    r8 - 0x0000000000000000 (0)
-    r9 - 0x00007fffffffc2c0 (140737488339648)
-   r10 - 0x0000000000000008 (8)
-   r11 - 0x0000000000000246 (582)
-   r12 - 0x00007fffffffc606 (140737488340486)
-   r13 - 0x0000000000bacdc0 (12242368)
-   r14 - 0x00007fffffffd2b0 (140737488343728)
-   r15 - 0x0000000000000004 (4)
-   rip - 0x00007ffff6e3ffb7 (0x7ffff6e3ffb7 <raise+199>)
-eflags - 0x00000246 ([ PF ZF IF ])
-    cs - 0x00000033 (51)
-    ss - 0x0000002b (43)
-    ds - 0x00000000 (0)
-    es - 0x00000000 (0)
-    fs - 0x00000000 (0)
-    gs - 0x00000000 (0)
-
-Crash context:
-/* Register reference: rcx - 0x00007ffff6e3ffb7 (140737335525303) */
-/* Register reference: rsp - 0x00007fffffffc2c0 (0x7fffffffc2c0) */
-Execution stopped here ==> 0x00007ffff6e3ffb7: mov    rcx,QWORD PTR [rsp+0x108]
-
 Crashing thread backtrace:
 #0  0x00007ffff6e3ffb7 in raise (/lib/x86_64-linux-gnu/libc-2.27.so)
                        at /lib/x86_64-linux-gnu/libc.so.6
@@ -65,7 +34,6 @@ Crashing thread backtrace:
                        ||:
                        --: }
                        at test.c:33
-
 
 ASAN Report:
 =================================================================
@@ -116,6 +84,37 @@ Shadow byte legend (one shadow byte represents 8 application bytes):
   Left alloca redzone:     ca
   Right alloca redzone:    cb
 ==29964==ABORTING
+
+Crash context:
+/* Register reference: rcx - 0x00007ffff6e3ffb7 (140737335525303) */
+/* Register reference: rsp - 0x00007fffffffc2c0 (0x7fffffffc2c0) */
+Execution stopped here ==> 0x00007ffff6e3ffb7: mov    rcx,QWORD PTR [rsp+0x108]
+
+Register info:
+   rax - 0x0000000000000000 (0)
+   rbx - 0x00000000013ad438 (20632632)
+   rcx - 0x00007ffff6e3ffb7 (140737335525303)
+   rdx - 0x0000000000000000 (0)
+   rsi - 0x00007fffffffc2c0 (140737488339648)
+   rdi - 0x0000000000000002 (2)
+   rbp - 0x00000000013ad438 (0x13ad438 <__sanitizer::CheckFailed(char const*, int, char const*, unsigned long long, unsigned long long)::num_calls>)
+   rsp - 0x00007fffffffc2c0 (0x7fffffffc2c0)
+    r8 - 0x0000000000000000 (0)
+    r9 - 0x00007fffffffc2c0 (140737488339648)
+   r10 - 0x0000000000000008 (8)
+   r11 - 0x0000000000000246 (582)
+   r12 - 0x00007fffffffc606 (140737488340486)
+   r13 - 0x0000000000bacdc0 (12242368)
+   r14 - 0x00007fffffffd2b0 (140737488343728)
+   r15 - 0x0000000000000004 (4)
+   rip - 0x00007ffff6e3ffb7 (0x7ffff6e3ffb7 <raise+199>)
+eflags - 0x00000246 ([ PF ZF IF ])
+    cs - 0x00000033 (51)
+    ss - 0x0000002b (43)
+    ds - 0x00000000 (0)
+    es - 0x00000000 (0)
+    fs - 0x00000000 (0)
+    gs - 0x00000000 (0)
 
 Child STDOUT (no output):
 

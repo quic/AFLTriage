@@ -44,6 +44,7 @@ pub struct EnrichedInstructionContext {
     /// The raw instruction string taken from the debugging backend
     pub insn: String,
     /// AFLTriage's architecture independent guess as to which registers were referenced
+    // TODO HELPWANTED: https://github.com/serde-rs/json/issues/513 do this
     #[serde(skip_serializing_if = "Option::is_none")]
     pub referenced_regs: Option<Vec<Rc<GdbRegister>>>,
     // TODO: support memory references?
