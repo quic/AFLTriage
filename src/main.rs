@@ -21,14 +21,14 @@ extern crate clap;
 extern crate num_cpus;
 
 pub mod afl;
-pub mod gdb_triage;
+pub mod debugger;
 pub mod platform;
 pub mod process;
 pub mod report;
 pub mod util;
 pub mod bucket;
 
-use gdb_triage::{GdbTriageError, GdbTriageResult, GdbTriager};
+use debugger::gdb::{GdbTriageError, GdbResultCode, GdbTriageErrorKind, GdbTriageResult, GdbTriager};
 use process::ChildResult;
 use bucket::{CrashBucketStrategy, CrashBucketInfo};
 
@@ -46,7 +46,7 @@ arg_enum! {
         // Opinionated fields derived from the raw triage output
         json,
         // Unfiltered JSON output from the triage script and child process
-        raw,
+        rawjson,
     }
 }
 
@@ -107,7 +107,7 @@ fn setup_command_line() -> ArgMatches<'static> {
                                .takes_value(true)
                                .help("How many lines of program output from the target to include in reports. Use 0 to mean unlimited lines (not recommended)."))
                           .arg(Arg::with_name("ofmt")
-                               .long("--output-format")
+                               .long("--report-format")
                                .takes_value(true)
                                .multiple(true)
                                .use_delimiter(true)
@@ -250,7 +250,7 @@ fn triage_test_case(
         match gdb.triage_program(&prog_args, input_file, debug, timeout_ms) {
             Ok(triage_result) => triage_result,
             Err(e) => {
-                if e.error_kind == gdb_triage::GdbTriageErrorKind::Timeout {
+                if e.error_kind == GdbTriageErrorKind::Timeout {
                     return TriageResult::Timedout;
                 } else {
                     return TriageResult::Error(e);
@@ -259,8 +259,8 @@ fn triage_test_case(
         };
 
     match triage_result.response.result {
-        gdb_triage::GdbResultCode::SUCCESS => TriageResult::Crash(triage_result),
-        gdb_triage::GdbResultCode::ERROR_TARGET_NOT_RUNNING => TriageResult::NoCrash(triage_result.child),
+        GdbResultCode::SUCCESS => TriageResult::Crash(triage_result),
+        GdbResultCode::ERROR_TARGET_NOT_RUNNING => TriageResult::NoCrash(triage_result.child),
     }
 }
 
@@ -777,7 +777,7 @@ fn main_wrapper() -> i32 {
                     testcase: path.to_string(),
                     debugger: "gdb".into(), // TODO
                     bucket: bucket::bucket_crash(CrashBucketStrategy::afltriage, &etriage), // TODO
-                    report_options: options.clone(),
+                    report_options: report_options.clone(),
                 };
 
                 let bucket = &envelope.bucket.strategy_result;

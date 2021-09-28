@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use crate::process::{self, ChildResult};
 
-const INTERNAL_TRIAGE_SCRIPT: &[u8] = include_bytes!("../gdb/triage.py");
+const INTERNAL_TRIAGE_SCRIPT: &[u8] = include_bytes!("./res/GDBTriage.py");
 
 #[derive(Debug, Serialize, PartialEq, Deserialize)]
 pub struct GdbSymbol {

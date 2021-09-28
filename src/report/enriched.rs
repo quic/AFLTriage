@@ -8,7 +8,7 @@ use super::sanitizer::*;
 use serde::{Deserialize, Serialize};
 use regex::Regex;
 use std::collections::HashMap;
-use crate::gdb_triage::*;
+use crate::debugger::gdb::*;
 use crate::ReportOptions;
 use crate::util;
 use crate::platform::linux::si_code_to_string;

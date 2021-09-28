@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 use crate::{ReportOptions, ReportEnvelope};
-use crate::gdb_triage::*;
+use crate::debugger::gdb::*;
 use crate::report::enriched::*;
 use crate::util::elide_size;
 
