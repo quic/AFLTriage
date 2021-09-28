@@ -740,6 +740,11 @@ fn main_wrapper() -> i32 {
         unique_errors: HashMap::new(),
     }));
 
+    let report_options = ReportOptions {
+        child_output_lines,
+        show_child_output: child_output,
+    };
+
     all_testcases.par_iter().panic_fuse().for_each(|testcase| {
         let path = testcase.path.to_str().unwrap();
         let result = triage_test_case(&gdb, &binary_args, path, debug, input_stdin, timeout_ms);
@@ -765,12 +770,7 @@ fn main_wrapper() -> i32 {
                 }
             }
             TriageResult::Crash(triage) => {
-                let options = ReportOptions {
-                    child_output_lines,
-                    show_child_output: child_output,
-                };
-
-                let etriage = report::enriched::enrich_triage_info(&options, &triage).unwrap();
+                let etriage = report::enriched::enrich_triage_info(&report_options, &triage).unwrap();
 
                 let envelope = ReportEnvelope {
                     command_line: binary_args.iter().map(|x| x.to_string()).collect(),
@@ -780,15 +780,15 @@ fn main_wrapper() -> i32 {
                     report_options: options.clone(),
                 };
 
+                let bucket = &envelope.bucket.strategy_result;
+
                 //let report_val = serde_json::to_value(&etriage).unwrap();
                 //let mut wrapper_val = serde_json::to_value(&envelope).unwrap();
                 //wrapper_val.as_object_mut().unwrap().insert("report".into(), report_val);
                 //let rendered = serde_json::to_string_pretty(&wrapper_val).unwrap();
                 //write_message(rendered, Some(path));
 
-                //let report = report::text::format_text_report(&triage);
                 state.crashed += 1;
-                let bucket = &envelope.bucket.strategy_result;
 
                 if !state.crash_signature.contains(bucket) {
                     write_message(format!("{}", etriage.summary), Some(path));
@@ -796,7 +796,6 @@ fn main_wrapper() -> i32 {
                     state.crash_signature.insert(bucket.to_string());
 
                     let text_report = report::text::format_text_report_new(&etriage, &envelope);
-                    //let text_report = report::text::format_text_report_full(&options, path, &binary_cmdline, &report, &triage);
 
                     if output_dir.is_none() {
                         write_message(format!(
