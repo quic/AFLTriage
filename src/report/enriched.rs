@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use regex::Regex;
 use std::collections::HashMap;
 use crate::gdb_triage::*;
+use crate::ReportOptions;
 use crate::util;
 use crate::platform::linux::si_code_to_string;
 
@@ -78,7 +79,7 @@ pub struct EnrichedThreadInfo {
     /// Registers may be collected during debugger backtracing
     /// Order is based on the debugging backend
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub regs: Option<Vec<Rc<GdbRegister>>>,
+    pub registers: Option<Vec<Rc<GdbRegister>>>,
     /// One or more instructions that were collected for this thread
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instruction_context: Option<Vec<EnrichedInstructionContext>>,
@@ -157,11 +158,6 @@ pub struct EnrichedTriageInfo {
     /// Raw output from the target, if enabled
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_output: Option<EnrichedTargetOutput>,
-}
-
-pub struct ReportOptions {
-    pub show_child_output: bool,
-    pub child_output_lines: usize,
 }
 
 pub fn enrich_triage_info(opt: &ReportOptions, triage_result: &GdbTriageResult) -> Result<EnrichedTriageInfo, &'static str> {
@@ -292,14 +288,14 @@ fn find_faulting_frame(thread: &EnrichedThreadInfo, sanitizers: &Vec<SanitizerRe
 
 fn build_thread_info(arch_info: &GdbArchInfo, thread: &GdbThread) -> EnrichedThreadInfo {
     let frames: Vec<EnrichedFrameInfo> = thread.backtrace.iter().map(|f| build_frame_info(arch_info, f)).collect();
-    let regs = thread.registers.as_ref().map(|d| d.clone());
+    let registers = thread.registers.as_ref().map(|d| d.clone());
     let first_insn_ctx = thread.current_instruction.as_ref()
-        .map(|i| build_instruction_context(arch_info, &regs, i.to_string(), frames[0].address.r));
+        .map(|i| build_instruction_context(arch_info, &registers, i.to_string(), frames[0].address.r));
     let insnctx = first_insn_ctx.map(|i| vec![i]);
 
     EnrichedThreadInfo {
         frames,
-        regs,
+        registers,
         instruction_context: insnctx,
     }
 }

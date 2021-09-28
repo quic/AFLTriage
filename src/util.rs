@@ -92,3 +92,17 @@ pub fn list_sorted_files_at(path: &Path) -> io::Result<Vec<PathBuf>> {
     Ok(files)
 }
 
+pub fn expand_filepath_templates(args: &[&str], value: &str) -> Vec<String> {
+    let mut expanded_args: Vec<String> = Vec::new();
+
+    for arg in args.iter() {
+        if *arg == "@@" {
+            expanded_args.push(value.to_string());
+        } else {
+            expanded_args.push((*arg).to_string());
+        }
+    }
+
+    expanded_args
+}
+

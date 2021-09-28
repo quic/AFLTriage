@@ -1,10 +1,13 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
-use crate::gdb_triage::{GdbRegister, GdbContextInfo, GdbTriageResult};
+use crate::{ReportOptions, ReportEnvelope};
+use crate::gdb_triage::*;
+use crate::report::enriched::*;
+use crate::report::sanitizer::*;
 use crate::platform::linux::si_code_to_string;
-use crate::util::elide_size;
-use super::sanitizer::*;
+use crate::util::{elide_size, tail_string};
+
 use regex::Regex;
 use std::cmp;
 use std::collections::HashSet;
@@ -330,6 +333,378 @@ pub fn format_text_report(triage_result: &GdbTriageResult) -> CrashReport {
     report
 }
 
+pub fn format_text_report_full(opt: &crate::ReportOptions, path: &str, binary_cmdline: &str, report: &CrashReport, triage: &GdbTriageResult) -> String {
+    let mut text_report = format!(
+        "Summary: {}\nCommand line: {}\nTestcase: {}\nStack hash: {}\n\n",
+        report.headline, binary_cmdline, path, report.stackhash
+    );
+
+    text_report += &format!("Register info:\n{}\n", report.register_info);
+    text_report += &format!("Crash context:\n{}\n", report.crash_context);
+    text_report += &format!("Crashing thread backtrace:\n{}\n", report.backtrace);
+
+    if !report.asan_body.is_empty() {
+        text_report += &format!("ASAN Report:\n{}\n", report.asan_body);
+    }
+
+    let mut format_output = |name: &str, output: &str| {
+        if output.is_empty() {
+            text_report.push_str(&format!("\nChild {} (no output):\n", name));
+        } else if opt.child_output_lines == 0 {
+            text_report
+                .push_str(&format!("\nChild {} (everything):\n{}\n", name, output));
+        } else {
+            let lines = tail_string(output, opt.child_output_lines);
+            text_report.push_str(&format!(
+                "\nChild {} (last {} lines):\n",
+                name, opt.child_output_lines
+            ));
+            for (i, line) in lines.iter().enumerate() {
+                if line.is_empty() && i + 1 == lines.len() {
+                    break;
+                }
+                text_report.push_str(&format!("{}\n", line));
+            }
+        }
+    };
+
+    if opt.show_child_output {
+        // Dont include the ASAN report duplicated in the child's STDERR
+        let stderr = if report.asan_body.is_empty() {
+            triage.child.stderr.to_string()
+        } else {
+            triage
+                .child
+                .stderr
+                .replace(&report.asan_body, "<ASAN Report>")
+        };
+
+        format_output("STDOUT", &triage.child.stdout);
+        format_output("STDERR", &stderr);
+    }
+
+    text_report
+}
+
+pub enum TextReportSectionEntry {
+    Line(String),
+    Section(TextReportSection),
+}
+
+pub struct TextReportSection {
+    pub section_name: String,
+    pub entries: Vec<TextReportSectionEntry>,
+}
+
+impl TextReportSection {
+    fn new(name: String) -> Self {
+        TextReportSection {
+            section_name: name,
+            entries: vec![],
+        }
+    }
+
+    fn add(&mut self, entry: TextReportSectionEntry) {
+        self.entries.push(entry);
+    }
+
+    fn add_line(&mut self, line: String) {
+        self.entries.push(TextReportSectionEntry::Line(line));
+    }
+
+    fn add_section(&mut self, section: TextReportSection) {
+        self.entries.push(TextReportSectionEntry::Section(section));
+    }
+
+    // todo indent
+    fn format(&self) -> String {
+        let mut out = String::new();
+        if !self.section_name.is_empty() {
+            out += &format!("{}:\n", self.section_name);
+        }
+
+        for entry in &self.entries {
+            match entry {
+                TextReportSectionEntry::Line(l) => {
+                    out += &format!("{}\n", l);
+                },
+                TextReportSectionEntry::Section(s) => {
+                    out += &format!("{}\n", s.format());
+                },
+            }
+        }
+
+        out
+    }
+}
+
+pub struct TextReportSections {
+    pub header: TextReportSection,
+    pub register_info: TextReportSection,
+    pub crash_context: TextReportSection,
+    pub backtrace: TextReportSection,
+    pub sanitizer_report: TextReportSection,
+    pub child_output: TextReportSection,
+}
+
+fn build_text_report(einfo: &EnrichedTriageInfo, envelope: &ReportEnvelope) -> TextReportSections {
+    let mut header = TextReportSection::new("".into());
+    let mut register_info = TextReportSection::new("Register info".into());
+    let mut crash_context = TextReportSection::new("Crash context".into());
+
+    let mut backtrace = TextReportSection::new("Crashing thread backtrace".into());
+    let mut sanitizer_report = TextReportSection::new("ASAN Report".into()); // TODO asan
+    let mut child_output = TextReportSection::new("".into());
+
+    header.add_line(format!(
+        "Summary: {}\nCommand line: {}\nTestcase: {}\nStack hash: {}",
+        einfo.summary, envelope.command_line.join(" "), envelope.testcase, "e7a73ec00e0f0d990e5a753f8f942622", // TODO
+    ));
+
+    build_register_info(einfo, &mut register_info);
+    build_instruction_context(einfo, &mut crash_context);
+    build_backtrace(einfo, &mut backtrace);
+
+    if let Some(reports) = &einfo.sanitizer_reports {
+        // TODO: multiple reports
+        if reports.len() > 0 {
+            let san_report = &reports[0];
+            if !san_report.body.is_empty() {
+                sanitizer_report.add_line(san_report.body.to_string());
+            }
+        }
+    }
+
+    if let Some(toutput) = &einfo.target_output {
+        build_target_output(toutput, &envelope.report_options, &mut child_output);
+    }
+
+    TextReportSections {
+        header,
+        register_info,
+        crash_context,
+        backtrace,
+        sanitizer_report,
+        child_output,
+    }
+}
+
+fn build_backtrace(einfo: &EnrichedTriageInfo, backtrace: &mut TextReportSection) {
+    for (i, fr) in einfo.faulting_thread.frames.iter().enumerate() {
+
+        let mut ctx = vec![];
+        let frame_header_p1 = format!("#{:<2} {}", i, fr.address.f);
+        let frame_pad = frame_header_p1.len() + 1;
+        let frame_header_p2 = fr.symbol.as_ref()
+            .map(|s| format!("in {} ({})", s.format(), fr.module))
+            .unwrap_or(format!("in {}", fr.module));
+
+        backtrace.add_line(format!("{} {}", frame_header_p1, frame_header_p2));
+
+        if let Some(symbol) = &fr.symbol {
+            let file_sym = symbol.format_file();
+
+            if let Some(source_ctx) = &fr.source_context {
+                if !source_ctx.is_empty() {
+                    let lines = build_source_context(fr, symbol, source_ctx);
+                    ctx.extend(lines);
+                }
+            }
+
+            if !file_sym.is_empty() {
+                ctx.push(format!("at {}", file_sym));
+            }
+        }
+
+        for line in &ctx {
+            println!("{}", frame_pad);
+            backtrace.add_line(format!("{:pad$}{}", "", line, pad = frame_pad));
+        }
+
+        if !ctx.is_empty() {
+            backtrace.add_line(format!(""));
+        }
+    }
+}
+
+fn build_source_context(fr: &EnrichedFrameInfo, symbol: &GdbSymbol, source_ctx: &Vec<EnrichedSourceContext>) -> Vec<String> {
+    /* NNN: <FUNCTION_PROTOTYPE> {
+     * |||: <REF 1>
+     * |||: <REF 2>
+     * NNN: <BODY1>
+     * NNN: <BODY2>
+     * |||:
+     * ---: }
+     */
+
+    let mut ctx = vec![];
+
+    let gutter_width = source_ctx.iter().map(|v| format!("{}", v.line_no).len()).max().unwrap();
+
+    // <FUNCTION_PROTOTYPE>
+    match symbol.function_line {
+        Some(line) => {
+            ctx.push(format!(
+                "{:>gutter_width$}: {} {{",
+                line,
+                symbol.format_function_prototype(),
+                gutter_width = gutter_width
+            ));
+        }
+        None => ctx.push(format!(
+            "{:?<gutter_width$}: {} {{",
+            "",
+            symbol.format_function_prototype(),
+            gutter_width = gutter_width
+        )),
+    }
+
+    // see if first line of crash context is less than or equal to function line
+    let first_line = source_ctx[0].line_no;
+    let function_line = symbol.function_line.unwrap_or(0);
+
+    if first_line > ((function_line + 1) as usize) {
+        ctx.push(format!("{:|<gutter_width$}:", "", gutter_width = gutter_width));
+    }
+
+    // <REF>
+    // Print all unique references
+    let mut seen = HashSet::new();
+
+    for src in source_ctx.iter() {
+        if let Some(refs) = &src.references {
+            for r in refs.iter() {
+                if !seen.contains(&r.name) {
+                    seen.insert(&r.name);
+                    ctx.push(format!(
+                        "{:|<gutter_width$}: /* Local reference: {} */",
+                        "",
+                        elide_size(&r.format_decl(), 200),
+                        gutter_width = gutter_width
+                    ));
+                }
+            }
+        }
+    }
+
+
+    // <BODY>
+    for src in source_ctx.iter() {
+        if src.line_no <= (function_line as usize) {
+            continue;
+        }
+
+        // context always comes before the line
+        ctx.push(format!("{:>gutter_width$}: {}", src.line_no, src.source, gutter_width = gutter_width));
+    }
+
+    ctx.push(format!("{:|<gutter_width$}:", "", gutter_width = gutter_width));
+    ctx.push(format!("{:-<gutter_width$}: }}", "", gutter_width = gutter_width));
+
+    ctx
+}
+
+fn build_target_output(toutput: &EnrichedTargetOutput, opt: &ReportOptions, child_output: &mut TextReportSection) {
+    let mut section_title = |name: &str, output: &str| -> String {
+        if output.is_empty() {
+            format!("Child {} (no output)", name)
+        } else if opt.child_output_lines == 0 {
+            format!("Child {} (everything)", name)
+        } else {
+            format!("Child {} (last {} lines)", name, opt.child_output_lines)
+        }
+    };
+
+    let mut stdout = TextReportSection::new(section_title("STDOUT", &toutput.stdout));
+    let mut stderr = TextReportSection::new(section_title("STDERR", &toutput.stderr));
+
+    if !toutput.stdout.is_empty() {
+        stdout.add_line(toutput.stdout.to_string());
+    }
+    if !toutput.stderr.is_empty() {
+        stderr.add_line(toutput.stderr.to_string());
+    }
+
+    child_output.add_section(stdout);
+    child_output.add_section(stderr);
+}
+
+fn build_register_info(einfo: &EnrichedTriageInfo, register_info: &mut TextReportSection) {
+    if let Some(registers) = &einfo.faulting_thread.registers {
+        let mut regpad = 0;
+        for reg in registers {
+            regpad = std::cmp::max(regpad, reg.name.len());
+        }
+
+        for reg in registers {
+            let reg_hexpad = reg.size * 2;
+            register_info.add_line(format!(
+                "{:>regpad$} - 0x{:0>reg_hexpad$x} ({})",
+                reg.name,
+                reg.value,
+                reg.pretty_value,
+                regpad = regpad,
+                reg_hexpad = reg_hexpad as usize
+            ));
+        }
+    }
+}
+
+fn build_instruction_context(einfo: &EnrichedTriageInfo, crash_context: &mut TextReportSection) {
+    if let Some(insn_ctx) = &einfo.faulting_thread.instruction_context {
+        let stopped_here = "Execution stopped here ==> ";
+
+        for (i, insn) in insn_ctx.iter().enumerate() {
+            if let Some(ref_regs) = &insn.referenced_regs {
+                for reg in ref_regs {
+                    let reg_hexpad = reg.size * 2;
+                    crash_context.add_line(format!(
+                        "/* Register reference: {} - 0x{:0>reg_hexpad$x} ({}) */",
+                        reg.name,
+                        reg.value,
+                        reg.pretty_value,
+                        reg_hexpad = reg_hexpad as usize
+                    ));
+                }
+            }
+
+            // FIXME: assumes last instruction context is PC
+            if i+1 == insn_ctx.len() {
+                crash_context.add_line(format!(
+                    "{}{}: {}",
+                    stopped_here, insn.address.f, insn.insn,
+                ));
+            } else {
+                crash_context.add_line(format!(
+                    "{:pad$}{}: {}",
+                    "", insn.address.f, insn.insn, pad=stopped_here.len()
+                ));
+            }
+        }
+    }
+}
+
+fn format_text_report_new(sections: TextReportSections) -> String {
+    let mut report: String = String::new();
+
+    report += &sections.header.format();
+    report += "\n";
+    report += &sections.register_info.format();
+    report += "\n";
+    report += &sections.crash_context.format();
+    report += "\n";
+    report += &sections.backtrace.format();
+    report += "\n";
+    report += &sections.sanitizer_report.format();
+    report += "\n";
+    report += &sections.child_output.format();
+
+    // remove all but last newline
+    report = report.trim().to_string();
+    report += "\n";
+    report
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -354,19 +729,31 @@ mod test {
         path
     }
 
+    fn assert_lines_eq(l: &str, r: &str) {
+        let ll: Vec<&str> = l.split("\n").collect();
+        let lr: Vec<&str> = r.split("\n").collect();
+
+        for (left, right) in (&ll).iter().zip(&lr) {
+            assert_eq!(left, right)
+        }
+
+        assert_eq!(ll.len(), lr.len())
+    }
+
     #[test]
     fn test_text_report() {
-        let json: GdbJsonResult = serde_json::from_str(&load_test("asan_stack_bof.rawjson")).unwrap();
-        let triage = GdbTriageResult {
-            response: json,
-            child: ChildResult {
-                stdout: "".into(),
-                stderr: "".into(),
-                status: ExitStatus::from_raw(0),
-            }
-        };
+        let mut envelope: serde_json::Value = serde_json::from_str(&load_test("asan_stack_bof.json")).unwrap();
+        let report: EnrichedTriageInfo = serde_json::from_value(
+            envelope.get_mut("report").unwrap().take()
+        ).unwrap();
 
-        let report = format_text_report(&triage);
-        //println!("{:?}", report);
+        let envelope_s: ReportEnvelope = serde_json::from_value(envelope).unwrap();
+
+        let text_golden: String = load_test("asan_stack_bof.txt");
+        let text_new: String = format_text_report_new(build_text_report(&report, &envelope_s));
+
+        println!("{}", text_new);
+        // compare lines
+        assert_lines_eq(&text_new, &text_golden);
     }
 }

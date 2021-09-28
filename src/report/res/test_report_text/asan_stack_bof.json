@@ -1,0 +1,476 @@
+{
+  "command_line": [
+    "./test",
+    "@@"
+  ],
+  "testcase": "test.c",
+  "debugger": "gdb",
+  "report_options": {
+    "show_child_output": true,
+    "child_output_lines": 25
+  },
+  "report": {
+    "faulting_frame_idx": 6,
+    "faulting_function": "bad_read",
+    "faulting_thread": {
+      "frames": [
+        {
+          "address": {
+            "f": "0x00007ffff6e3ffb7",
+            "r": 140737335525303,
+            "s": 64
+          },
+          "module": "/lib/x86_64-linux-gnu/libc-2.27.so",
+          "module_address": "/lib/x86_64-linux-gnu/libc-2.27.so+0x3efb7",
+          "relative_address": {
+            "f": "0x000000000003efb7",
+            "r": 257975,
+            "s": 64
+          },
+          "summary": "0x00007ffff6e3ffb7 in raise (/lib/x86_64-linux-gnu/libc-2.27.so)",
+          "symbol": {
+            "file": "/lib/x86_64-linux-gnu/libc.so.6",
+            "function_name": "raise"
+          }
+        },
+        {
+          "address": {
+            "f": "0x00007ffff6e41921",
+            "r": 140737335531809,
+            "s": 64
+          },
+          "module": "/lib/x86_64-linux-gnu/libc-2.27.so",
+          "module_address": "/lib/x86_64-linux-gnu/libc-2.27.so+0x40921",
+          "relative_address": {
+            "f": "0x0000000000040921",
+            "r": 264481,
+            "s": 64
+          },
+          "summary": "0x00007ffff6e41921 in abort (/lib/x86_64-linux-gnu/libc-2.27.so)",
+          "symbol": {
+            "file": "/lib/x86_64-linux-gnu/libc.so.6",
+            "function_name": "abort"
+          }
+        },
+        {
+          "address": {
+            "f": "0x000000000050327b",
+            "r": 5255803,
+            "s": 64
+          },
+          "module": "/tmp/test",
+          "module_address": "/tmp/test (.text)+0xe95eb",
+          "relative_address": {
+            "f": "0x00000000000e95eb",
+            "r": 955883,
+            "s": 64
+          },
+          "summary": "0x000000000050327b in __sanitizer::Abort() (/tmp/test)",
+          "symbol": {
+            "function_name": "__sanitizer::Abort()"
+          }
+        },
+        {
+          "address": {
+            "f": "0x00000000005005a8",
+            "r": 5244328,
+            "s": 64
+          },
+          "module": "/tmp/test",
+          "module_address": "/tmp/test (.text)+0xe6918",
+          "relative_address": {
+            "f": "0x00000000000e6918",
+            "r": 944408,
+            "s": 64
+          },
+          "summary": "0x00000000005005a8 in __sanitizer::Die() (/tmp/test)",
+          "symbol": {
+            "function_name": "__sanitizer::Die()"
+          }
+        },
+        {
+          "address": {
+            "f": "0x00000000004e282d",
+            "r": 5122093,
+            "s": 64
+          },
+          "module": "/tmp/test",
+          "module_address": "/tmp/test (.text)+0xc8b9d",
+          "relative_address": {
+            "f": "0x00000000000c8b9d",
+            "r": 822173,
+            "s": 64
+          },
+          "summary": "0x00000000004e282d in __asan::ReportGenericError(unsigned long, unsigned long, unsigned long, unsigned long, bool, unsigned long, unsigned int, bool) (/tmp/test)",
+          "symbol": {
+            "function_name": "__asan::ReportGenericError(unsigned long, unsigned long, unsigned long, unsigned long, bool, unsigned long, unsigned int, bool)"
+          }
+        },
+        {
+          "address": {
+            "f": "0x00000000004e3018",
+            "r": 5124120,
+            "s": 64
+          },
+          "module": "/tmp/test",
+          "module_address": "/tmp/test (.text)+0xc9388",
+          "relative_address": {
+            "f": "0x00000000000c9388",
+            "r": 824200,
+            "s": 64
+          },
+          "summary": "0x00000000004e3018 in __asan_report_load4 (/tmp/test)",
+          "symbol": {
+            "function_name": "__asan_report_load4"
+          }
+        },
+        {
+          "address": {
+            "f": "0x00000000005122d8",
+            "r": 5317336,
+            "s": 64
+          },
+          "module": "/tmp/test",
+          "module_address": "/tmp/test (.text)+0xf8648",
+          "relative_address": {
+            "f": "0x00000000000f8648",
+            "r": 1017416,
+            "s": 64
+          },
+          "source_context": [
+            {
+              "file": "test.c",
+              "line_no": 18,
+              "references": [],
+              "source": "{"
+            },
+            {
+              "file": "test.c",
+              "line_no": 19,
+              "references": [
+                {
+                  "name": "arr",
+                  "type": "int [4]",
+                  "value": "{0, 1, 2, 3}"
+                }
+              ],
+              "source": "  int arr[] = {0, 1, 2, 3};"
+            },
+            {
+              "file": "test.c",
+              "line_no": 20,
+              "references": [
+                {
+                  "name": "c",
+                  "type": "int",
+                  "value": "0"
+                },
+                {
+                  "name": "arr",
+                  "type": "int [4]",
+                  "value": "{0, 1, 2, 3}"
+                }
+              ],
+              "source": "  int c = arr[4];"
+            }
+          ],
+          "summary": "0x00000000005122d8 in bad_read (/tmp/test)",
+          "symbol": {
+            "callsite": [
+              "{",
+              "  int arr[] = {0, 1, 2, 3};",
+              "  int c = arr[4];"
+            ],
+            "file": "test.c",
+            "function_line": 17,
+            "function_name": "bad_read",
+            "function_signature": "void ()",
+            "line": 20,
+            "locals": [
+              {
+                "name": "arr",
+                "type": "int [4]",
+                "value": "{0, 1, 2, 3}"
+              },
+              {
+                "name": "c",
+                "type": "int",
+                "value": "0"
+              }
+            ],
+            "mangled_function_name": "bad_read"
+          }
+        },
+        {
+          "address": {
+            "f": "0x00000000005123ca",
+            "r": 5317578,
+            "s": 64
+          },
+          "module": "/tmp/test",
+          "module_address": "/tmp/test (.text)+0xf873a",
+          "relative_address": {
+            "f": "0x00000000000f873a",
+            "r": 1017658,
+            "s": 64
+          },
+          "source_context": [
+            {
+              "file": "test.c",
+              "line_no": 31,
+              "source": "  fprintf(stderr, \"Executing!\\n\");"
+            },
+            {
+              "file": "test.c",
+              "line_no": 32,
+              "source": "  //crash_fpe();"
+            },
+            {
+              "file": "test.c",
+              "line_no": 33,
+              "source": "  bad_read();"
+            }
+          ],
+          "summary": "0x00000000005123ca in main (/tmp/test)",
+          "symbol": {
+            "callsite": [
+              "  fprintf(stderr, \"Executing!\\n\");",
+              "  //crash_fpe();",
+              "  bad_read();"
+            ],
+            "file": "test.c",
+            "function_line": 29,
+            "function_name": "main",
+            "function_signature": "int ()",
+            "line": 33,
+            "mangled_function_name": "main"
+          }
+        }
+      ],
+      "instruction_context": [
+        {
+          "address": {
+            "f": "0x00007ffff6e3ffb7",
+            "r": 140737335525303,
+            "s": 64
+          },
+          "insn": "mov    rcx,QWORD PTR [rsp+0x108]",
+          "referenced_regs": [
+            {
+              "name": "rcx",
+              "pretty_value": "140737335525303",
+              "size": 8,
+              "type": "int64_t",
+              "value": 140737335525303
+            },
+            {
+              "name": "rsp",
+              "pretty_value": "0x7fffffffc2c0",
+              "size": 8,
+              "type": "",
+              "value": 140737488339648
+            }
+          ]
+        }
+      ],
+      "registers": [
+        {
+          "name": "rax",
+          "pretty_value": "0",
+          "size": 8,
+          "type": "int64_t",
+          "value": 0
+        },
+        {
+          "name": "rbx",
+          "pretty_value": "20632632",
+          "size": 8,
+          "type": "int64_t",
+          "value": 20632632
+        },
+        {
+          "name": "rcx",
+          "pretty_value": "140737335525303",
+          "size": 8,
+          "type": "int64_t",
+          "value": 140737335525303
+        },
+        {
+          "name": "rdx",
+          "pretty_value": "0",
+          "size": 8,
+          "type": "int64_t",
+          "value": 0
+        },
+        {
+          "name": "rsi",
+          "pretty_value": "140737488339648",
+          "size": 8,
+          "type": "int64_t",
+          "value": 140737488339648
+        },
+        {
+          "name": "rdi",
+          "pretty_value": "2",
+          "size": 8,
+          "type": "int64_t",
+          "value": 2
+        },
+        {
+          "name": "rbp",
+          "pretty_value": "0x13ad438 <__sanitizer::CheckFailed(char const*, int, char const*, unsigned long long, unsigned long long)::num_calls>",
+          "size": 8,
+          "type": "",
+          "value": 20632632
+        },
+        {
+          "name": "rsp",
+          "pretty_value": "0x7fffffffc2c0",
+          "size": 8,
+          "type": "",
+          "value": 140737488339648
+        },
+        {
+          "name": "r8",
+          "pretty_value": "0",
+          "size": 8,
+          "type": "int64_t",
+          "value": 0
+        },
+        {
+          "name": "r9",
+          "pretty_value": "140737488339648",
+          "size": 8,
+          "type": "int64_t",
+          "value": 140737488339648
+        },
+        {
+          "name": "r10",
+          "pretty_value": "8",
+          "size": 8,
+          "type": "int64_t",
+          "value": 8
+        },
+        {
+          "name": "r11",
+          "pretty_value": "582",
+          "size": 8,
+          "type": "int64_t",
+          "value": 582
+        },
+        {
+          "name": "r12",
+          "pretty_value": "140737488340486",
+          "size": 8,
+          "type": "int64_t",
+          "value": 140737488340486
+        },
+        {
+          "name": "r13",
+          "pretty_value": "12242368",
+          "size": 8,
+          "type": "int64_t",
+          "value": 12242368
+        },
+        {
+          "name": "r14",
+          "pretty_value": "140737488343728",
+          "size": 8,
+          "type": "int64_t",
+          "value": 140737488343728
+        },
+        {
+          "name": "r15",
+          "pretty_value": "4",
+          "size": 8,
+          "type": "int64_t",
+          "value": 4
+        },
+        {
+          "name": "rip",
+          "pretty_value": "0x7ffff6e3ffb7 <raise+199>",
+          "size": 8,
+          "type": "",
+          "value": 140737335525303
+        },
+        {
+          "name": "eflags",
+          "pretty_value": "[ PF ZF IF ]",
+          "size": 4,
+          "type": "i386_eflags",
+          "value": 582
+        },
+        {
+          "name": "cs",
+          "pretty_value": "51",
+          "size": 4,
+          "type": "int32_t",
+          "value": 51
+        },
+        {
+          "name": "ss",
+          "pretty_value": "43",
+          "size": 4,
+          "type": "int32_t",
+          "value": 43
+        },
+        {
+          "name": "ds",
+          "pretty_value": "0",
+          "size": 4,
+          "type": "int32_t",
+          "value": 0
+        },
+        {
+          "name": "es",
+          "pretty_value": "0",
+          "size": 4,
+          "type": "int32_t",
+          "value": 0
+        },
+        {
+          "name": "fs",
+          "pretty_value": "0",
+          "size": 4,
+          "type": "int32_t",
+          "value": 0
+        },
+        {
+          "name": "gs",
+          "pretty_value": "0",
+          "size": 4,
+          "type": "int32_t",
+          "value": 0
+        }
+      ]
+    },
+    "sanitizer_reports": [
+      {
+        "body": "=================================================================\n==29964==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7fffffffd2b0 at pc 0x0000005122d8 bp 0x7fffffffd270 sp 0x7fffffffd268\nREAD of size 4 at 0x7fffffffd2b0 thread T0\n    #0 0x5122d7 in bad_read /tmp/test.c:20\n    #1 0x5123c9 in main /tmp/test.c:33\n    #2 0x7ffff6e22bf6 in __libc_start_main /build/glibc-S9d2JN/glibc-2.27/csu/../csu/libc-start.c:310\n    #3 0x419d49 in _start ??:?\n\nAddress 0x7fffffffd2b0 is located in stack of thread T0 at offset 48 in frame\n    #0 0x5121af in bad_read /tmp/test.c:18\n\n  This frame has 1 object(s):\n    [32, 48) 'arr' (line 19) <== Memory access at offset 48 overflows this variable\nHINT: this may be a false positive if your program uses some custom stack unwind mechanism or swapcontext\n      (longjmp and C++ exceptions *are* supported)\nSUMMARY: AddressSanitizer: stack-buffer-overflow /tmp/test.c:20 in bad_read\nShadow bytes around the buggy address:\n  0x10007fff7a00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n  0x10007fff7a10: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n  0x10007fff7a20: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n  0x10007fff7a30: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n  0x10007fff7a40: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n=>0x10007fff7a50: f1 f1 f1 f1 00 00[f3]f3 00 00 00 00 00 00 00 00\n  0x10007fff7a60: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n  0x10007fff7a70: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n  0x10007fff7a80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n  0x10007fff7a90: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n  0x10007fff7aa0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\nShadow byte legend (one shadow byte represents 8 application bytes):\n  Addressable:           00\n  Partially addressable: 01 02 03 04 05 06 07 \n  Heap left redzone:       fa\n  Freed heap region:       fd\n  Stack left redzone:      f1\n  Stack mid redzone:       f2\n  Stack right redzone:     f3\n  Stack after return:      f5\n  Stack use after scope:   f8\n  Global redzone:          f9\n  Global init order:       f6\n  Poisoned by user:        f7\n  Container overflow:      fc\n  Array cookie:            ac\n  Intra object redzone:    bb\n  ASan internal:           fe\n  Left alloca redzone:     ca\n  Right alloca redzone:    cb\n==29964==ABORTING",
+        "frames": [
+          5317335,
+          5317577,
+          140737335405558,
+          4300105
+        ],
+        "operation": "READ",
+        "sanitizer": "AddressSanitizer",
+        "sanitizer_short": "ASAN",
+        "stop_reason": "stack-buffer-overflow"
+      }
+    ],
+    "stop_info": {
+      "signal_code": -6,
+      "signal_code_name": "SI_TKILL",
+      "signal_name": "SIGABRT",
+      "signal_number": 6,
+      "summary": "SIGABRT (si_signo=6) / SI_TKILL (si_code=-6)"
+    },
+    "summary": "ASAN detected stack-buffer-overflow in bad_read after a READ leading to SIGABRT (si_signo=6) / SI_TKILL (si_code=-6)",
+    "target_output": {
+      "stderr": "Executing!\n<Replaced AddressSanitizer Report>\n",
+      "stdout": ""
+    },
+    "terse_summary": "ASAN_stack-buffer-overflow_READ_bad_read"
+  }
+}

@@ -422,6 +422,8 @@ impl GdbTriager {
             // FIXME: index cache is a bit unreliable on earlier GDB versions
             //"-iex", "set index-cache on",
             //"-iex", "set index-cache directory gdb_cache",
+
+            // Make special effort to get target output WITHOUT any GDB logging
             "-iex", "set print inferior-events off",
             // write the marker to both stdout and stderr as they are not interleaved
             // Markers will not print if logging is to /dev/null

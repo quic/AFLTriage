@@ -6,6 +6,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use is_executable::IsExecutable;
 use rayon::prelude::*;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::path::{Path, PathBuf};
@@ -147,6 +148,22 @@ enum TriageResult {
     Timedout,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct ReportEnvelope {
+    command_line: Vec<String>,
+    testcase: String,
+    debugger: String,
+    //env: Vec<String>,
+    //bucket: CrashBucketInfo,
+    report_options: ReportOptions,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReportOptions {
+    pub show_child_output: bool,
+    pub child_output_lines: usize,
+}
+
 struct ProfileResult {
     process_result: std::io::Result<ChildResult>,
     process_execution_time: Duration,
@@ -168,7 +185,7 @@ fn profile_target(
 ) -> std::io::Result<ProfileResult> {
     log::info!("Profiling target...");
 
-    let prog_args = expand_filepath_templates(binary_args, testcase);
+    let prog_args = util::expand_filepath_templates(binary_args, testcase);
 
     let input_file = if input_stdin {
         Some(util::read_file_to_bytes(testcase)?)
@@ -214,20 +231,6 @@ fn profile_target(
     })
 }
 
-fn expand_filepath_templates(args: &[&str], value: &str) -> Vec<String> {
-    let mut expanded_args: Vec<String> = Vec::new();
-
-    for arg in args.iter() {
-        if *arg == "@@" {
-            expanded_args.push(value.to_string());
-        } else {
-            expanded_args.push((*arg).to_string());
-        }
-    }
-
-    expanded_args
-}
-
 fn triage_test_case(
     gdb: &GdbTriager,
     binary_args: &[&str],
@@ -236,7 +239,7 @@ fn triage_test_case(
     input_stdin: bool,
     timeout_ms: u64,
 ) -> TriageResult {
-    let prog_args = expand_filepath_templates(binary_args, testcase);
+    let prog_args = util::expand_filepath_templates(binary_args, testcase);
 
     // Whether to pass a file in via GDB stdin
     let input_file = if input_stdin { Some(testcase) } else { None };
@@ -760,13 +763,26 @@ fn main_wrapper() -> i32 {
                 }
             }
             TriageResult::Crash(triage) => {
-                let options = report::enriched::ReportOptions {
+                let options = ReportOptions {
                     child_output_lines,
                     show_child_output: child_output,
                 };
 
-                let report2 = report::enriched::enrich_triage_info(&options, &triage);
-                let rendered = serde_json::to_string_pretty(&report2.unwrap()).unwrap();
+                let report2 = report::enriched::enrich_triage_info(&options, &triage).unwrap();
+
+                let wrapper = ReportEnvelope {
+                    command_line: binary_args.iter().map(|x| x.to_string()).collect(),
+                    testcase: path.to_string(),
+                    debugger: "gdb".into(), // TODO
+                    report_options: options.clone(),
+                    //report: serde_json::to_value(&report2).unwrap(),
+                };
+
+                let report_val = serde_json::to_value(&report2).unwrap();
+                let mut wrapper_val = serde_json::to_value(&wrapper).unwrap();
+                wrapper_val.as_object_mut().unwrap().insert("report".into(), report_val);
+
+                let rendered = serde_json::to_string_pretty(&wrapper_val).unwrap();
 
                 write_message(rendered, Some(path));
 
@@ -778,54 +794,7 @@ fn main_wrapper() -> i32 {
 
                     state.crash_signature.insert(report.stackhash.to_string());
 
-                    let mut text_report = format!(
-                        "Summary: {}\nCommand line: {}\nTestcase: {}\nStack hash: {}\n\n",
-                        report.headline, binary_cmdline, path, report.stackhash
-                    );
-
-                    text_report += &format!("Register info:\n{}\n", report.register_info);
-                    text_report += &format!("Crash context:\n{}\n", report.crash_context);
-                    text_report += &format!("Crashing thread backtrace:\n{}\n", report.backtrace);
-
-                    if !report.asan_body.is_empty() {
-                        text_report += &format!("ASAN Report:\n{}\n", report.asan_body);
-                    }
-
-                    let mut format_output = |name: &str, output: &str| {
-                        if output.is_empty() {
-                            text_report.push_str(&format!("\nChild {} (no output):\n", name));
-                        } else if child_output_lines == 0 {
-                            text_report
-                                .push_str(&format!("\nChild {} (everything):\n{}\n", name, output));
-                        } else {
-                            let lines = util::tail_string(output, child_output_lines);
-                            text_report.push_str(&format!(
-                                "\nChild {} (last {} lines):\n",
-                                name, child_output_lines
-                            ));
-                            for (i, line) in lines.iter().enumerate() {
-                                if line.is_empty() && i + 1 == lines.len() {
-                                    break;
-                                }
-                                text_report.push_str(&format!("{}\n", line));
-                            }
-                        }
-                    };
-
-                    if child_output {
-                        // Dont include the ASAN report duplicated in the child's STDERR
-                        let stderr = if report.asan_body.is_empty() {
-                            triage.child.stderr
-                        } else {
-                            triage
-                                .child
-                                .stderr
-                                .replace(&report.asan_body, "<ASAN Report>")
-                        };
-
-                        format_output("STDOUT", &triage.child.stdout);
-                        format_output("STDERR", &stderr);
-                    }
+                    let text_report = report::text::format_text_report_full(&options, path, &binary_cmdline, &report, &triage);
 
                     if output_dir.is_none() {
                         write_message(format!(
@@ -888,8 +857,11 @@ fn main_wrapper() -> i32 {
         state.errored
     );
 
+    let mut retval = 0;
+
     if state.errored == total {
         log::error!("Something seems to be wrong during triage as all testcases errored.");
+        retval = 1; // this is a particually bad case. let parent processes know
     }
 
     if state.errored > 0 {
@@ -903,6 +875,8 @@ fn main_wrapper() -> i32 {
             let times = format!(" (seen {} time(s))", times);
             log::error!("Triage error {}: {}", times, err.to_string());
         }
+
+        // still return 0 as *some* testcases may have succeeded
     }
 
     if state.no_crash == total {
@@ -913,5 +887,5 @@ fn main_wrapper() -> i32 {
         log::warn!("All of the testcases timed out! Try increasing the timeout (debugger symbol loading can increase triage time) and double check you are using the right command line.");
     }
 
-    return 0;
+    return retval;
 }

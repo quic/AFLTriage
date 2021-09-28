@@ -1,7 +1,7 @@
 Summary: ASAN detected stack-buffer-overflow in bad_read after a READ leading to SIGABRT (si_signo=6) / SI_TKILL (si_code=-6)
 Command line: ./test @@
 Testcase: test.c
-Stack hash: 4457d80db1478a7c708b1fa3c49f5b1a
+Stack hash: e7a73ec00e0f0d990e5a753f8f942622
 
 Register info:
    rax - 0x0000000000000000 (0)
@@ -20,7 +20,7 @@ Register info:
    r13 - 0x0000000000bacdc0 (12242368)
    r14 - 0x00007fffffffd2b0 (140737488343728)
    r15 - 0x0000000000000004 (4)
-   rip - 0x00007ffff6e3ffb7 (0x7ffff6e3ffb7 <__GI_raise+199>)
+   rip - 0x00007ffff6e3ffb7 (0x7ffff6e3ffb7 <raise+199>)
 eflags - 0x00000246 ([ PF ZF IF ])
     cs - 0x00000033 (51)
     ss - 0x0000002b (43)
@@ -32,44 +32,44 @@ eflags - 0x00000246 ([ PF ZF IF ])
 Crash context:
 /* Register reference: rcx - 0x00007ffff6e3ffb7 (140737335525303) */
 /* Register reference: rsp - 0x00007fffffffc2c0 (0x7fffffffc2c0) */
-Execution stopped here ==> 0x7ffff6e3ffb7: mov    rcx,QWORD PTR [rsp+0x108]
+Execution stopped here ==> 0x00007ffff6e3ffb7: mov    rcx,QWORD PTR [rsp+0x108]
 
 Crashing thread backtrace:
-#0  0x7ffff6e3ffb7 in __GI_raise (/lib/x86_64-linux-gnu/libc-2.27.so)
-                   at ../sysdeps/unix/sysv/linux/raise.c:51
+#0  0x00007ffff6e3ffb7 in raise (/lib/x86_64-linux-gnu/libc-2.27.so)
+                       at /lib/x86_64-linux-gnu/libc.so.6
 
-#1  0x7ffff6e41921 in __GI_abort (/lib/x86_64-linux-gnu/libc-2.27.so)
-                   at abort.c:79
+#1  0x00007ffff6e41921 in abort (/lib/x86_64-linux-gnu/libc-2.27.so)
+                       at /lib/x86_64-linux-gnu/libc.so.6
 
-#2  0x0050327b in __sanitizer::Abort() (/tmp/test)
-#3  0x005005a8 in __sanitizer::Die() (/tmp/test)
-#4  0x004e282d in __asan::ReportGenericError(unsigned long, unsigned long, unsigned long, unsigned long, bool, unsigned long, unsigned int, bool) (/tmp/test)
-#5  0x004e3018 in __asan_report_load4 (/tmp/test)
-#6  0x005122d8 in bad_read (/tmp/test)
-               17: void bad_read() {
-               ||: /* Local reference: int [4] arr = {0, 1, 2, 3}; */
-               ||: /* Local reference: int c = 32767; */
-               18: {
-               19:   int arr[] = {0, 1, 2, 3};
-               20:   int c = arr[4];
-               ||:
-               --: }
-               at test.c:20
+#2  0x000000000050327b in __sanitizer::Abort() (/tmp/test)
+#3  0x00000000005005a8 in __sanitizer::Die() (/tmp/test)
+#4  0x00000000004e282d in __asan::ReportGenericError(unsigned long, unsigned long, unsigned long, unsigned long, bool, unsigned long, unsigned int, bool) (/tmp/test)
+#5  0x00000000004e3018 in __asan_report_load4 (/tmp/test)
+#6  0x00000000005122d8 in bad_read (/tmp/test)
+                       17: void bad_read() {
+                       ||: /* Local reference: int [4] arr = {0, 1, 2, 3}; */
+                       ||: /* Local reference: int c = 0; */
+                       18: {
+                       19:   int arr[] = {0, 1, 2, 3};
+                       20:   int c = arr[4];
+                       ||:
+                       --: }
+                       at test.c:20
 
-#7  0x005123ca in main (/tmp/test)
-               29: int main() {
-               ||:
-               31:   fprintf(stderr, "Executing!\n");
-               32:   //crash_fpe();
-               33:   bad_read();
-               ||:
-               --: }
-               at test.c:33
+#7  0x00000000005123ca in main (/tmp/test)
+                       29: int main() {
+                       ||:
+                       31:   fprintf(stderr, "Executing!\n");
+                       32:   //crash_fpe();
+                       33:   bad_read();
+                       ||:
+                       --: }
+                       at test.c:33
 
 
 ASAN Report:
 =================================================================
-==44757==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7fffffffd2b0 at pc 0x0000005122d8 bp 0x7fffffffd270 sp 0x7fffffffd268
+==29964==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7fffffffd2b0 at pc 0x0000005122d8 bp 0x7fffffffd270 sp 0x7fffffffd268
 READ of size 4 at 0x7fffffffd2b0 thread T0
     #0 0x5122d7 in bad_read /tmp/test.c:20
     #1 0x5123c9 in main /tmp/test.c:33
@@ -115,10 +115,10 @@ Shadow byte legend (one shadow byte represents 8 application bytes):
   ASan internal:           fe
   Left alloca redzone:     ca
   Right alloca redzone:    cb
-==44757==ABORTING
+==29964==ABORTING
 
 Child STDOUT (no output):
 
 Child STDERR (last 25 lines):
 Executing!
-<ASAN Report>
+<Replaced AddressSanitizer Report>
