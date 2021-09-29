@@ -28,7 +28,7 @@ pub mod report;
 pub mod util;
 pub mod bucket;
 
-use debugger::gdb::{GdbTriageError, GdbResultCode, GdbTriageErrorKind, GdbTriageResult, GdbTriager};
+use debugger::gdb::*;
 use process::ChildResult;
 use bucket::{CrashBucketStrategy, CrashBucketInfo};
 
@@ -40,12 +40,13 @@ arg_enum! {
     #[derive(PartialEq, Debug)]
     // these are user controlable options so follow normal cmdline conventions
     #[allow(non_camel_case_types)]
-    pub enum OutputFormat {
+    pub enum ReportOutputFormat {
         // A simple, but opinionated text report. Don't parse this directly, choose JSON or raw instead, as the output format is unversioned
         text,
         // Opinionated fields derived from the raw triage output
         json,
         // Unfiltered JSON output from the triage script and child process
+        // Heavily dependent on the debugging backend
         rawjson,
     }
 }
@@ -106,16 +107,16 @@ fn setup_command_line() -> ArgMatches<'static> {
                                .default_value("25")
                                .takes_value(true)
                                .help("How many lines of program output from the target to include in reports. Use 0 to mean unlimited lines (not recommended)."))
-                          .arg(Arg::with_name("ofmt")
-                               .long("--report-format")
+                          .arg(Arg::with_name("report_formats")
+                               .long("--report-formats")
                                .takes_value(true)
                                .multiple(true)
                                .use_delimiter(true)
-                               .possible_values(&OutputFormat::variants())
+                               .possible_values(&ReportOutputFormat::variants())
                                .default_value("text")
                                .required(false)
                                .case_insensitive(true)
-                               .help("The triage report output format (multiple values allowed)."))
+                               .help("The triage report output formats. Multiple values allowed: e.g. text,json."))
                           .arg(Arg::with_name("stdin")
                                .long("--stdin")
                                .takes_value(false)
@@ -144,7 +145,7 @@ struct TriageState {
 }
 
 enum TriageResult {
-    NoCrash(ChildResult),
+    NoCrash(GdbChildOutput),
     Crash(GdbTriageResult),
     Error(GdbTriageError),
     Timedout,
@@ -158,6 +159,12 @@ pub struct ReportEnvelope {
     //env: Vec<String>,
     bucket: CrashBucketInfo,
     report_options: ReportOptions,
+}
+
+struct RenderedReport {
+    data: String,
+    format: ReportOutputFormat,
+    extension: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -310,7 +317,7 @@ fn determine_input_type(input: &Path) -> UserInputPathType {
     UserInputPathType::Unknown
 }
 
-fn sanity_check(gdb: &GdbTriager, binary_args: &[&str]) -> bool {
+fn environment_check(gdb: &GdbTriager, binary_args: &[&str]) -> bool {
     let rawexe = binary_args.get(0).unwrap();
     let exe = PathBuf::from(rawexe);
     let justfilename = exe
@@ -518,16 +525,18 @@ fn main() {
 }
 
 fn main_wrapper() -> i32 {
-    /* AFLTriage Flow
+    /* AFLTriage High Level Flow
      *
-     * 1. Environment sanity check: gdb python, binary exists
+     * 1. Environment check: gdb python, binary exists, cmdline okay
      * 2. Input processing: for each input path determine single file, dir with files, afl dir single, afl
      *    dir primary/secondaries
-     *      - Reject AFL dirs for multiple different fuzzers and provide guidance for this
+     *      - Reject AFL dirs for multiple different fuzzer instances and provide guidance for this
      * 3. Input collection: resolve all paths to input files in a stable order
-     *      - Convert paths to unique identifiers for report writing
-     * 4. Triaging: collect crash info, process crash info, classify/dedup
-     *      - Write report in text/json
+     * 4. Triaging: collect triage info in parallel, process it, bucket crashes
+     * 5. Reporting: format triage information into reports
+     *      - Write reports in the formats requested (text/json/raw)
+     *
+     * That's really...it. Seems simple, but it's the details that requires a lot of code.
      */
 
     let args = setup_command_line();
@@ -536,11 +545,9 @@ fn main_wrapper() -> i32 {
     init_logger();
 
     let binary_args: Vec<&str> = args.values_of("command").unwrap().collect();
+    let gdb: GdbTriager = GdbTriager::new("gdb".to_string()); // TODO: AFLTRIAGE_GDB_PATH
 
-    // TODO: fix binary_args validation
-    let gdb: GdbTriager = GdbTriager::new();
-
-    if !sanity_check(&gdb, &binary_args) {
+    if !environment_check(&gdb, &binary_args) {
         return 1;
     }
 
@@ -561,9 +568,7 @@ fn main_wrapper() -> i32 {
         }
     }
 
-    let binary_cmdline = binary_args.join(" ");
-
-    log::info!("Image triage cmdline: \"{}\"", binary_cmdline);
+    log::info!("Image triage cmdline: \"{}\"", binary_args.join(" "));
 
     let output = args.value_of("output").unwrap();
 
@@ -583,9 +588,12 @@ fn main_wrapper() -> i32 {
         Some(d)
     };
 
-    match &output_dir {
-        Some(_) => log::info!("Reports will be output to directory \"{}\"", output),
-        None => log::info!("Reports output to terminal"),
+    let report_output_formats: Vec<ReportOutputFormat> = values_t!(args, "report_formats", ReportOutputFormat).unwrap_or_else(|e| e.exit());
+
+    if output_dir.is_some() {
+        log::info!("Will write {:?} reports to directory \"{}\"", report_output_formats, output);
+    } else {
+        log::info!("Will output {:?} reports to terminal", report_output_formats);
     }
 
     let input_paths: Vec<&str> = args.values_of("input").unwrap().collect();
@@ -749,7 +757,7 @@ fn main_wrapper() -> i32 {
         let path = testcase.path.to_str().unwrap();
         let result = triage_test_case(&gdb, &binary_args, path, debug, input_stdin, timeout_ms);
 
-        // do very little with this lock held. do not reorder
+        // Do not reorder. Avoid long computations with this lock held
         let mut state = state.lock().unwrap();
 
         // TODO: display child-output even without a crash to help debug triage errors
@@ -775,7 +783,7 @@ fn main_wrapper() -> i32 {
                 let envelope = ReportEnvelope {
                     command_line: binary_args.iter().map(|x| x.to_string()).collect(),
                     testcase: path.to_string(),
-                    debugger: "gdb".into(), // TODO
+                    debugger: gdb.gdb_path.to_string(),
                     bucket: bucket::bucket_crash(CrashBucketStrategy::afltriage, &etriage), // TODO
                     report_options: report_options.clone(),
                 };
@@ -791,31 +799,67 @@ fn main_wrapper() -> i32 {
                 state.crashed += 1;
 
                 if !state.crash_signature.contains(bucket) {
+                    state.crash_signature.insert(bucket.to_string());
                     write_message(format!("{}", etriage.summary), Some(path));
 
-                    state.crash_signature.insert(bucket.to_string());
+                    let mut rendered_reports = vec![];
 
-                    let text_report = report::text::format_text_report_new(&etriage, &envelope);
+                    if report_output_formats.contains(&ReportOutputFormat::text) {
+                        let text_report = report::text::format_text_report(&etriage, &envelope);
+                        rendered_reports.push(RenderedReport {
+                            data: text_report,
+                            format: ReportOutputFormat::text,
+                            extension: "txt"
+                        });
+                    }
+                    if report_output_formats.contains(&ReportOutputFormat::json) {
+                        let report_val = serde_json::to_value(&etriage).unwrap();
+                        let mut wrapper_val = serde_json::to_value(&envelope).unwrap();
+                        wrapper_val.as_object_mut().unwrap().insert("report".into(), report_val);
+                        let rendered = serde_json::to_string_pretty(&wrapper_val).unwrap();
 
-                    if output_dir.is_none() {
-                        write_message(format!(
-                            "--- REPORT BEGIN ---\n{}\n--- REPORT END ---",
-                            text_report,
-                        ), None);
-                    } else {
-                        let output_dir = output_dir.as_ref().unwrap();
-                        let report_filename = format!(
-                            "afltriage_{}_{}.txt",
+                        rendered_reports.push(RenderedReport {
+                            data: rendered,
+                            format: ReportOutputFormat::json,
+                            extension: "json",
+                        });
+                    }
+                    if report_output_formats.contains(&ReportOutputFormat::rawjson) {
+                        let report_val = serde_json::to_value(&triage).unwrap();
+                        let mut wrapper_val = serde_json::to_value(&envelope).unwrap();
+                        wrapper_val.as_object_mut().unwrap().insert("report".into(), report_val);
+                        let rendered = serde_json::to_string_pretty(&wrapper_val).unwrap();
+
+                        rendered_reports.push(RenderedReport {
+                            data: rendered,
+                            format: ReportOutputFormat::rawjson,
+                            extension: "rawjson",
+                        });
+                    }
+
+                    let filename = format!("afltriage_{}_{}",
                             util::sanitize(&etriage.terse_summary),
-                            util::sanitize(bucket),
-                        );
+                            util::sanitize(bucket));
 
-                        if let Err(e) =
-                            std::fs::write(output_dir.join(report_filename), text_report)
-                        {
-                            // TODO: notify / exit early
-                            let failed_to_write = format!("Failed to write report: {}", e);
-                            write_message(failed_to_write, Some(path));
+                    for report in rendered_reports {
+                        let report_name = report.format.to_string().to_uppercase();
+
+                        if output_dir.is_none() {
+                            write_message(format!(
+                                "--- {} REPORT BEGIN ---\n{}\n--- {} REPORT END ---",
+                                report_name, report.data, report_name,
+                            ), None);
+                        } else {
+                            let output_dir = output_dir.as_ref().unwrap();
+                            let report_filename = format!("{}.{}", filename, report.extension);
+
+                            if let Err(e) =
+                                std::fs::write(output_dir.join(report_filename), report.data)
+                            {
+                                // TODO: notify / exit early
+                                let failed_to_write = format!("Failed to write report: {}", e);
+                                write_message(failed_to_write, Some(path));
+                            }
                         }
                     }
                 } else {
@@ -877,7 +921,7 @@ fn main_wrapper() -> i32 {
             log::error!("Triage error {}: {}", times, err.to_string());
         }
 
-        // still return 0 as *some* testcases may have succeeded
+        // even with errors, still return 0 as *some* testcases may have succeeded
     }
 
     if state.no_crash == total {

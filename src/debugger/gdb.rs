@@ -182,10 +182,16 @@ pub struct GdbJsonResult {
     pub context: Option<GdbContextInfo>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GdbTriageResult {
     pub response: GdbJsonResult,
-    pub child: ChildResult, // TODO: don't pass exit code as its for gdb
+    pub child: GdbChildOutput,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GdbChildOutput {
+    pub stdout: String,
+    pub stderr: String,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -327,17 +333,11 @@ enum GdbTriageScript {
 
 pub struct GdbTriager {
     triage_script: GdbTriageScript,
-    gdb: String,
-}
-
-impl Default for GdbTriager {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub gdb_path: String,
 }
 
 impl GdbTriager {
-    pub fn new() -> GdbTriager {
+    pub fn new(gdb_path: String) -> GdbTriager {
         let mut triage_script =
             GdbTriageScript::Internal(tempfile::Builder::new().suffix(".py").tempfile().unwrap());
 
@@ -347,10 +347,9 @@ impl GdbTriager {
             panic!("Unsupported script path");
         }
 
-        // TODO: allow user to select GDB
         GdbTriager {
             triage_script,
-            gdb: "gdb".to_string(),
+            gdb_path,
         }
     }
 
@@ -358,10 +357,10 @@ impl GdbTriager {
         let python_cmd = "python import gdb, sys; print('V:'+gdb.execute('show version', to_string=True).splitlines()[0]); print('P:'+sys.version.splitlines()[0].strip())";
         let gdb_args = vec!["--nx", "--batch", "-iex", python_cmd];
 
-        let output = match process::execute_capture_output(&self.gdb, &gdb_args) {
+        let output = match process::execute_capture_output(&self.gdb_path, &gdb_args) {
             Ok(o) => o,
             Err(e) => {
-                log::error!("Failed to execute '{}': {}", &self.gdb, e);
+                log::error!("Failed to execute specified GDB '{}': {}", &self.gdb_path, e);
                 return false;
             }
         };
@@ -379,7 +378,7 @@ impl GdbTriager {
 
         if !output.status.success() || version == None || python_version == None {
             log::error!(
-                "GDB sanity check failure\nARGS:{}\nSTDOUT: {}\nSTDERR: {}",
+                "GDB check failure\nARGS:{}\nSTDOUT: {}\nSTDERR: {}",
                 gdb_args.join(" "),
                 decoded_stdout,
                 decoded_stderr
@@ -443,13 +442,13 @@ impl GdbTriager {
         );
 
         let gdb_cmdline = &[&gdb_args[..], prog_args].concat();
-        let gdb_cmd_fmt = [std::slice::from_ref(&self.gdb), gdb_cmdline]
+        let gdb_cmd_fmt = [std::slice::from_ref(&self.gdb_path), gdb_cmdline]
             .concat()
             .join(" ");
 
         // Never write to stdin for GDB as it can pass testcases to the target using "run < FILE"
         let output =
-            match process::execute_capture_output_timeout(&self.gdb, gdb_cmdline, timeout_ms, None) {
+            match process::execute_capture_output_timeout(&self.gdb_path, gdb_cmdline, timeout_ms, None) {
                 Ok(o) => o,
                 Err(e) => {
                     return if e.kind() == ErrorKind::TimedOut {
@@ -531,10 +530,9 @@ impl GdbTriager {
         match serde_json::from_str(backtrace_output) {
             Ok(json) => Ok(GdbTriageResult {
                 response: json,
-                child: ChildResult {
+                child: GdbChildOutput {
                     stdout: child_output_stdout,
                     stderr: child_output_stderr,
-                    status: output.status,
                 },
             }),
             Err(e) => Err(GdbTriageError::new(

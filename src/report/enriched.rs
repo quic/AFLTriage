@@ -230,7 +230,7 @@ pub fn enrich_triage_info(opt: &ReportOptions, triage_result: &GdbTriageResult) 
     })
 }
 
-fn build_target_output(opt: &ReportOptions, child: &crate::process::ChildResult, sanitizer_reports: &Option<Vec<SanitizerReport>>) -> EnrichedTargetOutput {
+fn build_target_output(opt: &ReportOptions, child: &GdbChildOutput, sanitizer_reports: &Option<Vec<SanitizerReport>>) -> EnrichedTargetOutput {
     let stderr = if let Some(ref reports) = sanitizer_reports {
         // TODO: multiple reports
         if let Some(report) = reports.get(0) {
