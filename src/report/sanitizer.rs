@@ -34,6 +34,16 @@ pub struct SanitizerReport {
     pub body: String,
 }
 
+impl SanitizerReport {
+    pub fn name_prefer_short(&self) -> &str {
+        if self.sanitizer_short.is_empty() {
+            &self.sanitizer
+        } else {
+            &self.sanitizer_short
+        }
+    }
+}
+
 // TODO: support multiple sanitizer reports in successsion
 // TODO: support more sanitizers
 pub fn sanitizer_report_extract(input: &str) -> Option<SanitizerReport> {
@@ -137,6 +147,9 @@ mod test {
         let a = load_test("asan_fpe.txt");
         let r = sanitizer_report_extract(&a).unwrap();
 
+        assert_eq!(r.sanitizer, "AddressSanitizer");
+        assert_eq!(r.sanitizer_short, "ASAN");
+        assert_eq!(r.name_prefer_short(), "ASAN");
         assert_eq!(r.stop_reason, "FPE");
         assert_eq!(r.operation, "");
         assert_eq!(r.frames[0], 0x560b425587af);

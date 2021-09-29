@@ -124,11 +124,7 @@ fn build_text_report(einfo: &EnrichedTriageInfo, envelope: &ReportEnvelope) -> T
             let san_report = &reports[0];
             if !san_report.body.is_empty() {
                 // adjust the section title
-                let san_name = if san_report.sanitizer_short.is_empty() {
-                    &san_report.sanitizer
-                } else {
-                    &san_report.sanitizer_short
-                };
+                let san_name = san_report.name_prefer_short();
                 sanitizer_report.section_name = format!("{} Report", san_name);
                 sanitizer_report.add_line(san_report.body.to_string());
             }

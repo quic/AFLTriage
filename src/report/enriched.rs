@@ -184,23 +184,22 @@ pub fn enrich_triage_info(opt: &ReportOptions, triage_result: &GdbTriageResult) 
     match &faulting_sanitizer_report {
         Some(san) => {
             let op = if san.operation.is_empty() {
-                // TODO: sanitizer name to short name
                 terse_summary =
-                    format!("ASAN_{}_{}", san.stop_reason, faulting_function);
+                    format!("{}_{}_{}", san.name_prefer_short(), san.stop_reason, faulting_function);
 
                 "".to_string()
             } else {
                 terse_summary = format!(
-                    "ASAN_{}_{}_{}",
-                    san.stop_reason, san.operation, faulting_function
+                    "{}_{}_{}_{}",
+                    san.name_prefer_short(), san.stop_reason, san.operation, faulting_function
                 );
 
                 format!(" after a {}", san.operation)
             };
 
             summary = format!(
-                "ASAN detected {} in {}{} leading to {}",
-                san.stop_reason, faulting_function, op, stop_info.summary
+                "{} detected {} in {}{} leading to {}",
+                san.name_prefer_short(), san.stop_reason, faulting_function, op, stop_info.summary
             );
         }
         None => {
@@ -234,7 +233,7 @@ fn build_target_output(opt: &ReportOptions, child: &GdbChildOutput, sanitizer_re
     let stderr = if let Some(ref reports) = sanitizer_reports {
         // TODO: multiple reports
         if let Some(report) = reports.get(0) {
-            child.stderr.replace(&report.body, &format!("<Replaced {} Report>", report.sanitizer))
+            child.stderr.replace(&report.body, &format!("<Replaced {} Report>", report.name_prefer_short()))
         } else {
             child.stderr.to_string()
         }
@@ -362,9 +361,8 @@ fn build_frame_info(arch_info: &GdbArchInfo, fr: &GdbFrameInfo) -> EnrichedFrame
     let relative_address = AddressView::new(fr.relative_address, arch_info.address_bits);
     let module = fr.module.to_string();
     let module_address = fr.module_address.to_string();
-    // TODO: only include necessary fields instead of duplicating them
-    let symbol = fr.symbol.as_ref().map(|d| Rc::clone(d));
-    let srcctx = symbol.as_ref().map(|s| build_source_context(arch_info, s)).flatten();
+    let symbol_reduced = fr.symbol.as_ref().map(|s| reduce_debugger_symbol(s));
+    let srcctx = fr.symbol.as_ref().map(|s| build_source_context(arch_info, s)).flatten();
 
     let summary = fr.symbol.as_ref()
         .map(|d| format!("{} in {} ({})", address.f, d.format(), module))
@@ -376,9 +374,23 @@ fn build_frame_info(arch_info: &GdbArchInfo, fr: &GdbFrameInfo) -> EnrichedFrame
         relative_address,
         module,
         module_address,
-        symbol,
+        symbol: symbol_reduced,
         source_context: srcctx,
     }
+}
+
+fn reduce_debugger_symbol(symbol: &Rc<GdbSymbol>) -> Rc<GdbSymbol> {
+    Rc::new(GdbSymbol {
+        function_name: symbol.function_name.clone(),
+        function_line: symbol.function_line.clone(),
+        mangled_function_name: symbol.mangled_function_name.clone(),
+        function_signature: symbol.function_signature.clone(),
+        callsite: None,
+        file: symbol.file.clone(),
+        line: symbol.line.clone(),
+        args: None,
+        locals: None,
+    })
 }
 
 fn build_stop_info(arch: &GdbArchInfo, stop_info: &GdbStopInfo) -> EnrichedLinuxStopInfo {

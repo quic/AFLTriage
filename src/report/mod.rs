@@ -4,4 +4,3 @@
 pub mod sanitizer;
 pub mod text;
 pub mod enriched;
-pub mod raw;
