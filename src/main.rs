@@ -28,6 +28,7 @@ pub mod report;
 pub mod util;
 pub mod bucket;
 
+use afl::AflStats;
 use debugger::gdb::*;
 use process::ChildResult;
 use bucket::{CrashBucketStrategy, CrashBucketInfo};
@@ -277,12 +278,12 @@ enum UserInputPathType {
     Single,
     PlainDir,
     AflDir,
+    AflSyncDir,
 }
 
 struct UserInputPath {
     ty: UserInputPathType,
     path: PathBuf,
-    fuzzer_stats: Option<afl::AflStats>,
 }
 
 struct Testcase {
@@ -290,6 +291,12 @@ struct Testcase {
     /// Must be safe for filesystem
     #[allow(dead_code)]
     unique_id: String,
+}
+
+fn has_afl_directory_signature(input: &Path) -> bool {
+    return input.join("fuzzer_stats").exists() ||
+        input.join("queue").exists() ||
+        input.join("crashes").exists();
 }
 
 fn determine_input_type(input: &Path) -> UserInputPathType {
@@ -303,14 +310,17 @@ fn determine_input_type(input: &Path) -> UserInputPathType {
     }
 
     // looks like an AFL dir
-    if input.join("fuzzer_stats").exists()
-        || input.join("queue").exists()
-        || input.join("crashes").exists()
-    {
+    if has_afl_directory_signature(input) {
         return UserInputPathType::AflDir;
     }
 
     if metadata.file_type().is_dir() {
+        for subpath in util::list_sorted_files_at(input).unwrap_or(vec![]) {
+            if has_afl_directory_signature(subpath.as_path()) {
+                return UserInputPathType::AflSyncDir;
+            }
+        }
+
         return UserInputPathType::PlainDir;
     }
 
@@ -385,11 +395,66 @@ fn environment_check(gdb: &GdbTriager, binary_args: &[&str]) -> bool {
     true
 }
 
+struct AflDirInfo {
+    testcases: Vec<Testcase>,
+    aflstats: Option<AflStats>,
+}
+
+fn collect_afl_crashes_from_dir(path: &Path) -> Option<AflDirInfo> {
+    let mut testcases = vec![];
+    let path_str = path.to_str().unwrap();
+
+    match util::list_sorted_files_at(path.join("crashes").as_path()) {
+        Ok(tcs) => {
+            for tc in tcs {
+                if tc.is_file() {
+                    // TODO: robust filter command (.*id:.*)
+                    if tc.file_name().unwrap() == "README.txt" {
+                        continue;
+                    }
+
+                    testcases.push(Testcase {
+                        unique_id: "".to_string(),
+                        path: tc,
+                    });
+                }
+            }
+        }
+        Err(e) => {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                log::warn!("Failed to get AFL crashes from directory {}: {}",
+                path_str, e);
+                return None;
+            }
+        }
+    }
+
+    let aflstats =
+        match afl::parse_afl_fuzzer_stats(path.join("fuzzer_stats").as_path()) {
+            Ok(s) => match afl::validate_afl_fuzzer_stats(&s) {
+                Ok(s2) => Some(s2),
+                Err(e) => {
+                    log::warn!("Failed to validate AFL fuzzer_stats: {}", e);
+                    None
+                }
+            },
+            Err(_e) => {
+                log::warn!("AFL directory is missing fuzzer_stats");
+                None
+            }
+        };
+
+    Some(AflDirInfo {
+        testcases,
+        aflstats,
+    })
+}
+
 fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Testcase> {
     let mut all_testcases = Vec::new();
 
     for input in processed_inputs {
-        let path_str = input.path.to_str().unwrap();
+        let path_str = input.path.to_string_lossy();
 
         match input.ty {
             UserInputPathType::Single => {
@@ -422,60 +487,53 @@ fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Tes
                 }
             }
             UserInputPathType::AflDir => {
-                match util::list_sorted_files_at(input.path.join("crashes").as_path()) {
-                    Ok(tcs) => {
-                        let mut valid = 0;
-                        for tc in tcs {
-                            if tc.is_file() {
-                                // TODO: robust filter command (.*id:.*)
-                                if tc.file_name().unwrap() == "README.txt" {
-                                    continue;
-                                }
+                if let Some(afldir) = collect_afl_crashes_from_dir(input.path.as_path()) {
+                    if afldir.testcases.is_empty() {
+                        log::warn!("No crashes found in AFL directory {}", path_str);
+                    } else {
+                        log::info!("Triaging AFL directory {} ({} files)", path_str, afldir.testcases.len());
+                    }
 
-                                valid += 1;
-                                all_testcases.push(Testcase {
-                                    unique_id: "".to_string(),
-                                    path: tc,
-                                });
-                            }
-                        }
+                    if let Some(aflstats) = afldir.aflstats {
+                        log::info!("├─ Banner: {}", aflstats.afl_banner);
+                        log::info!("├─ Command line: \"{}\"", aflstats.command_line);
+                        log::info!("└─ Paths found: {}", aflstats.paths_total);
+                    }
 
-                        if valid > 0 {
-                            log::info!("Triaging AFL directory {} ({} files)", path_str, valid);
-                        } else {
-                            log::warn!("No crashes found in AFL directory {}", path_str);
+                    all_testcases.extend(afldir.testcases);
+                }
+            }
+            UserInputPathType::AflSyncDir => {
+                let mut instances: Vec<(PathBuf, AflDirInfo)> = vec![];
+
+                for instance in util::list_sorted_files_at(input.path.as_path()).unwrap_or(vec![]) {
+                    let subpath = instance.as_path();
+                    if has_afl_directory_signature(subpath) {
+                        if let Some(afldir) = collect_afl_crashes_from_dir(subpath) {
+                            instances.push((instance, afldir));
                         }
                     }
-                    Err(e) => log::warn!(
-                        "Failed to get AFL crashes from directory {}: {}",
-                        path_str,
-                        e
-                    ),
                 }
 
-                let fuzzer_stats =
-                    match afl::parse_afl_fuzzer_stats(input.path.join("fuzzer_stats").as_path()) {
-                        Ok(s) => match afl::validate_afl_fuzzer_stats(&s) {
-                            Ok(s2) => {
-                                log::info!("├─ Banner: {}", s2.afl_banner);
-                                log::info!("├─ Command line: \"{}\"", s2.command_line);
-                                log::info!("└─ Paths found: {}", s2.paths_total);
-                                Some(s2)
-                            }
-                            Err(e) => {
-                                log::warn!("Failed to validate AFL fuzzer_stats: {}", e);
-                                None
-                            }
-                        },
-                        Err(_e) => {
-                            log::warn!("AFL directory is missing fuzzer_stats");
-                            None
-                        }
-                    };
+                log::info!("Triaging AFL sync directory {} with {} instances",
+                    path_str, instances.len());
 
-                input.fuzzer_stats = fuzzer_stats;
+                for (subpath, instance) in instances {
+                    let name = subpath.file_name().unwrap().to_string_lossy();
+                    if instance.testcases.is_empty() {
+                        log::warn!("Skipping AFL instance {} with no crashes", name);
+                    } else {
+                        log::info!("Triaging AFL instance {} ({} files)", name, instance.testcases.len());
+                        if let Some(aflstats) = instance.aflstats {
+                            log::info!("├─ Banner: {}", aflstats.afl_banner);
+                            log::info!("├─ Command line: \"{}\"", aflstats.command_line);
+                            log::info!("└─ Paths found: {}", aflstats.paths_total);
+                        }
+                        all_testcases.extend(instance.testcases);
+                    }
+                }
             }
-            _ => log::warn!("Skipping unknown or missing path {}", path_str),
+            UserInputPathType::Unknown | UserInputPathType::Missing => log::warn!("Skipping unknown or missing path {}", path_str),
         }
     }
 
@@ -607,7 +665,6 @@ fn main_wrapper() -> i32 {
         processed_inputs.push(UserInputPath {
             ty,
             path,
-            fuzzer_stats: None,
         });
     }
 
