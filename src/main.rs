@@ -384,7 +384,7 @@ fn environment_check(gdb: &GdbTriager, binary_args: &[&str]) -> bool {
         Err(_) => match which::which("addr2line") {
             Ok(path) => {
                 env::set_var("ASAN_SYMBOLIZER_PATH", path.to_str().unwrap());
-                log::info!("Using ASAN_SYMBOLIZER_PATH=\"{}\"", path.to_str().unwrap());
+                //log::info!("Using ASAN_SYMBOLIZER_PATH=\"{}\"", path.to_str().unwrap());
             }
             _ => {
                 log::warn!("No ASAN_SYMBOLIZER_PATH found. Consider setting it to llvm-symbolizer or addr2line if your target is using ASAN");
@@ -647,11 +647,15 @@ fn main_wrapper() -> i32 {
     };
 
     let report_output_formats: Vec<ReportOutputFormat> = values_t!(args, "report_formats", ReportOutputFormat).unwrap_or_else(|e| e.exit());
+    let report_output_formats_s = report_output_formats.iter()
+        .map(|f| f.to_string())
+        .collect::<Vec<String>>()
+        .join(", ");
 
     if output_dir.is_some() {
-        log::info!("Will write {:?} reports to directory \"{}\"", report_output_formats, output);
+        log::info!("Will write {} reports to directory \"{}\"", report_output_formats_s, output);
     } else {
-        log::info!("Will output {:?} reports to terminal", report_output_formats);
+        log::info!("Will output {} reports to terminal", report_output_formats_s);
     }
 
     let input_paths: Vec<&str> = args.values_of("input").unwrap().collect();
@@ -920,7 +924,9 @@ fn main_wrapper() -> i32 {
                         }
                     }
                 } else {
-                    write_message(format!("{}", etriage.summary), Some(path));
+                    if !display_progress {
+                        write_message(format!("{}", etriage.summary), Some(path));
+                    }
                 }
             }
             TriageResult::Error(gdb_error) => {
