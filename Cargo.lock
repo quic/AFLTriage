@@ -24,6 +24,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shlex",
+ "signal-hook",
  "smol-timeout",
  "strum",
  "tempfile",

@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 #[macro_use]
@@ -602,6 +603,15 @@ fn main_wrapper() -> i32 {
     println!("AFLTriage v{} by Grant Hernandez\n", VERSION);
     init_logger();
 
+    let stop_requested = Arc::new(AtomicBool::new(false));
+    for sig in signal_hook::consts::TERM_SIGNALS {
+        // will exit on Ctrl+c the second time
+        // FIXME: child processes can still be running, becoming orphaned
+        signal_hook::flag::register_conditional_shutdown(*sig, 1, Arc::clone(&stop_requested)).unwrap();
+        // Friendly nudge to exit
+        signal_hook::flag::register(*sig, Arc::clone(&stop_requested)).unwrap();
+    }
+
     let binary_args: Vec<&str> = args.values_of("command").unwrap().collect();
     let gdb: GdbTriager = GdbTriager::new("gdb".to_string()); // TODO: AFLTRIAGE_GDB_PATH
 
@@ -815,6 +825,13 @@ fn main_wrapper() -> i32 {
     };
 
     all_testcases.par_iter().panic_fuse().for_each(|testcase| {
+        if stop_requested.load(Ordering::Relaxed) {
+            if display_progress {
+                pb.inc(1);
+            }
+            return
+        }
+
         let path = testcase.path.to_str().unwrap();
         let result = triage_test_case(&gdb, &binary_args, path, debug, input_stdin, timeout_ms);
 

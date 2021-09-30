@@ -48,6 +48,9 @@ unsafe fn pre_execute() {
     // With this, we don't need to create a dedicated PTY and session
     libc::sigemptyset(&mut set);
     libc::sigaddset(&mut set, libc::SIGWINCH);
+    // It will also receive user Ctrl+C signals which is not desired as this can create random
+    // triage errors during GDB script processing
+    libc::sigaddset(&mut set, libc::SIGINT);
     libc::sigprocmask(libc::SIG_BLOCK, &mut set, core::ptr::null_mut());
 }
 
