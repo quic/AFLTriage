@@ -46,6 +46,7 @@ impl SanitizerReport {
 
 // TODO: support multiple sanitizer reports in successsion
 // TODO: support more sanitizers
+// FIXME: string slicing of unicode can lead to panics
 pub fn sanitizer_report_extract(input: &str) -> Option<SanitizerReport> {
     // find the NEWEST sanitizer headline
     // regex doesn't support finding in reverse so we go at it forward

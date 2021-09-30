@@ -119,6 +119,14 @@ fn setup_command_line() -> ArgMatches<'static> {
                                .required(false)
                                .case_insensitive(true)
                                .help("The triage report output formats. Multiple values allowed: e.g. text,json."))
+                          .arg(Arg::with_name("bucket_strategy")
+                               .long("--bucket-strategy")
+                               .takes_value(true)
+                               .possible_values(&CrashBucketStrategy::variants())
+                               .default_value("afltriage")
+                               .required(false)
+                               .case_insensitive(true)
+                               .help("The crash deduplication strategy to use."))
                           .arg(Arg::with_name("stdin")
                                .long("--stdin")
                                .takes_value(false)
@@ -857,28 +865,23 @@ fn main_wrapper() -> i32 {
             }
             TriageResult::Crash(triage) => {
                 let etriage = report::enriched::enrich_triage_info(&report_options, &triage).unwrap();
-
-                let envelope = ReportEnvelope {
-                    command_line: binary_args.iter().map(|x| x.to_string()).collect(),
-                    testcase: path.to_string(),
-                    debugger: gdb.gdb_path.to_string(),
-                    bucket: bucket::bucket_crash(CrashBucketStrategy::afltriage, &etriage), // TODO
-                    report_options: report_options.clone(),
-                };
-
-                let bucket = &envelope.bucket.strategy_result;
-
-                //let report_val = serde_json::to_value(&etriage).unwrap();
-                //let mut wrapper_val = serde_json::to_value(&envelope).unwrap();
-                //wrapper_val.as_object_mut().unwrap().insert("report".into(), report_val);
-                //let rendered = serde_json::to_string_pretty(&wrapper_val).unwrap();
-                //write_message(rendered, Some(path));
+                let bucket_strategy = value_t!(args, "bucket_strategy", CrashBucketStrategy).unwrap();
+                let bucket_info = bucket::bucket_crash(bucket_strategy, &etriage);
+                let bucket = bucket_info.strategy_result.to_string();
 
                 state.crashed += 1;
 
-                if !state.crash_signature.contains(bucket) {
+                if !state.crash_signature.contains(&bucket) {
                     state.crash_signature.insert(bucket.to_string());
                     write_message(format!("{}", etriage.summary), Some(path));
+
+                    let envelope = ReportEnvelope {
+                        command_line: binary_args.iter().map(|x| x.to_string()).collect(),
+                        testcase: path.to_string(),
+                        debugger: gdb.gdb_path.to_string(),
+                        bucket: bucket_info,
+                        report_options: report_options.clone(),
+                    };
 
                     let mut rendered_reports = vec![];
 
@@ -917,7 +920,7 @@ fn main_wrapper() -> i32 {
 
                     let filename = format!("afltriage_{}_{}",
                             util::sanitize(&etriage.terse_summary),
-                            util::sanitize(bucket));
+                            util::sanitize(&bucket));
 
                     for report in rendered_reports {
                         let report_name = report.format.to_string().to_uppercase();
