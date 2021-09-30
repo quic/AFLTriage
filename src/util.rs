@@ -12,14 +12,10 @@ lazy_static! {
 }
 
 pub fn elide_size(s: &str, size: usize) -> String {
-    if size < 3 {
-        return "...".to_string();
-    }
+    let pos = s.char_indices().map(|(byte_offset, _)| byte_offset).nth(size);
 
-    let new_size = size - 3;
-
-    if s.len() > new_size {
-        format!("{}...", &s[..new_size])
+    if let Some(offset) = pos {
+        format!("{}...", &s[..offset])
     } else {
         s.to_string()
     }
@@ -106,3 +102,12 @@ pub fn expand_filepath_templates(args: &[&str], value: &str) -> Vec<String> {
     expanded_args
 }
 
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_elide_size() {
+        assert_eq!(elide_size("привет", 1), "п...");
+        assert_eq!(elide_size("привет", 6), "привет");
+    }
+}
