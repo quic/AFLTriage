@@ -864,15 +864,24 @@ fn main_wrapper() -> i32 {
                 }
             }
             TriageResult::Crash(triage) => {
+                // This can be used a "Crash ID" since we are in a lock
+                let crash_id = state.crashed;
+                state.crashed += 1;
+
                 let etriage = report::enriched::enrich_triage_info(&report_options, &triage).unwrap();
                 let bucket_strategy = value_t!(args, "bucket_strategy", CrashBucketStrategy).unwrap();
                 let bucket_info = bucket::bucket_crash(bucket_strategy, &etriage);
-                let bucket = bucket_info.strategy_result.to_string();
 
-                state.crashed += 1;
+                // Bucket info can be empty if bucketing failed or strategy is "none"
+                let bucket = if bucket_info.strategy_result.is_empty() {
+                    format!("CID_{}", crash_id)
+                } else {
+                    bucket_info.strategy_result.to_string()
+                };
 
                 if !state.crash_signature.contains(&bucket) {
                     state.crash_signature.insert(bucket.to_string());
+
                     write_message(format!("{}", etriage.summary), Some(path));
 
                     let envelope = ReportEnvelope {

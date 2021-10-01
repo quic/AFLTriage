@@ -19,6 +19,7 @@ arg_enum! {
     #[derive(Debug, PartialEq, Serialize, Deserialize)]
     #[allow(non_camel_case_types)]
     pub enum CrashBucketStrategy {
+        none,
         afltriage,
         first_frame,
         first_frame_raw,
@@ -33,6 +34,7 @@ arg_enum! {
 pub fn bucket_crash(strategy: CrashBucketStrategy, einfo: &EnrichedTriageInfo) -> CrashBucketInfo {
     let max_frames = einfo.faulting_thread.frames.len();
     let (strategy_result, inputs) = match &strategy {
+        CrashBucketStrategy::none => ("".into(), vec![]),
         CrashBucketStrategy::afltriage => bucket_first_n_frames(einfo, max_frames),
         CrashBucketStrategy::first_frame => bucket_first_n_frames(einfo, 1),
         CrashBucketStrategy::first_frame_raw => bucket_first_n_frames_raw(einfo, 1),
