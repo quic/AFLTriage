@@ -257,7 +257,19 @@
             "function_name": "main",
             "function_signature": "int ()",
             "line": 33,
-            "mangled_function_name": "main"
+            "mangled_function_name": "main",
+            "args": [
+              {
+                "name": "argc",
+                "type": "int",
+                "value": "1"
+              },
+              {
+                "name": "argv",
+                "type": "char *[]",
+                "value": "0x1234"
+              }
+            ]
           }
         }
       ],

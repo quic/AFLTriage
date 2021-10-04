@@ -388,7 +388,7 @@ fn reduce_debugger_symbol(symbol: &Rc<GdbSymbol>) -> Rc<GdbSymbol> {
         callsite: None,
         file: symbol.file.clone(),
         line: symbol.line.clone(),
-        args: None,
+        args: symbol.args.clone(),
         locals: None,
     })
 }

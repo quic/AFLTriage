@@ -26,7 +26,7 @@ Crashing thread backtrace:
                        at test.c:20
 
 #7  0x00000000005123ca in main (/tmp/test)
-                       29: int main() {
+                       29: int main(argc = (int)1, argv = (char *[])0x1234) {
                        ||:
                        31:   fprintf(stderr, "Executing!\n");
                        32:   //crash_fpe();
