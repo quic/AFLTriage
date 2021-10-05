@@ -120,4 +120,4 @@ Child STDOUT (no output):
 
 Child STDERR (last 25 lines):
 Executing!
-<Replaced AddressSanitizer Report>
+<Replaced ASAN Report>

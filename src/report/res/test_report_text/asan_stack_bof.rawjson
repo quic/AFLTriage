@@ -1,345 +1,313 @@
-{
-   "result" : "SUCCESS",
-   "context" : {
-      "primary_thread" : {
-         "backtrace" : [
-            {
-               "relative_address" : 257975,
-               "module_address" : "/lib/x86_64-linux-gnu/libc-2.27.so+0x3efb7",
-               "module" : "/lib/x86_64-linux-gnu/libc-2.27.so",
-               "address" : 140737335525303,
-               "symbol" : {
-                  "function_signature" : "int (int)",
-                  "function_line" : 27,
-                  "file" : "../sysdeps/unix/sysv/linux/raise.c",
-                  "locals" : [
-                     {
-                        "type" : "sigset_t",
-                        "name" : "set",
-                        "value" : "{__val = {134217728, 0 <repeats 11 times>, 3399988123389603631, 140737352425472, 140737488343616, 140737488340486}}"
-                     },
-                     {
-                        "value" : "<optimized out>",
-                        "name" : "pid",
-                        "type" : "pid_t"
-                     },
-                     {
-                        "type" : "pid_t",
-                        "value" : "<optimized out>",
-                        "name" : "tid"
-                     }
-                  ],
-                  "function_name" : "__GI_raise",
-                  "args" : [
-                     {
-                        "name" : "sig",
-                        "value" : "6",
-                        "type" : "int"
-                     }
-                  ],
-                  "line" : 51,
-                  "mangled_function_name" : "__GI_raise"
-               }
-            },
-            {
-               "symbol" : {
-                  "file" : "abort.c",
-                  "locals" : [
-                     {
-                        "value" : "1",
-                        "name" : "save_stage",
-                        "type" : "int"
-                     },
-                     {
-                        "value" : "{__sigaction_handler = {sa_handler = 0x0, sa_sigaction = 0x0}, sa_mask = {__val = {0 <repeats 11 times>, 4, 4356331, 0, 5241382, 140737488343728}}, sa_flags = -13800, sa_restorer = 0x13ad438 <__sanitizer::CheckFailed(char const*, int, char const*, unsigned long long, unsigned long long)::num_calls>}",
-                        "name" : "act",
-                        "type" : "struct sigaction"
-                     },
-                     {
-                        "type" : "sigset_t",
-                        "value" : "{__val = {32, 0 <repeats 15 times>}}",
-                        "name" : "sigs"
-                     }
-                  ],
-                  "function_name" : "__GI_abort",
-                  "line" : 79,
-                  "mangled_function_name" : "__GI_abort",
-                  "function_signature" : "void (void)",
-                  "function_line" : 48
-               },
-               "module_address" : "/lib/x86_64-linux-gnu/libc-2.27.so+0x40921",
-               "address" : 140737335531809,
-               "module" : "/lib/x86_64-linux-gnu/libc-2.27.so",
-               "relative_address" : 264481
-            },
-            {
-               "module_address" : "/tmp/test (.text)+0xe95eb",
-               "module" : "/tmp/test",
-               "address" : 5255803,
-               "symbol" : {
-                  "function_name" : "_ _sanitizer::Abort()"
-               },
-               "relative_address" : 955883
-            },
-            {
-               "symbol" : {
-                  "function_name" : "__sanitizer::Die()"
-               },
-               "module_address" : "/tmp/test (.text)+0xe6918",
-               "module" : "/tmp/test",
-               "address" : 5244328,
-               "relative_address" : 944408
-            },
-            {
-               "relative_address" : 822173,
-               "address" : 5122093,
-               "module_address" : "/tmp/test (.text)+0xc8b9d",
-               "module" : "/tmp/test",
-               "symbol" : {
-                  "function_name" : "__asan::ReportGenericError(unsigned long, unsigned long, unsigned long, unsigned long, bool, unsigned long, unsigned int, bool)"
-               }
-            },
-            {
-               "symbol" : {
-                  "function_name" : "__asan_report_load4"
-               },
-               "address" : 5124120,
-               "module_address" : "/tmp/test (.text)+0xc9388",
-               "module" : "/tmp/test",
-               "relative_address" : 824200
-            },
-            {
-               "symbol" : {
-                  "mangled_function_name" : "bad_read",
-                  "line" : 20,
-                  "locals" : [
-                     {
-                        "type" : "int [4]",
-                        "name" : "arr",
-                        "value" : "{0, 1, 2, 3}"
-                     },
-                     {
-                        "type" : "int",
-                        "value" : "32767",
-                        "name" : "c"
-                     }
-                  ],
-                  "function_name" : "bad_read",
-                  "function_line" : 17,
-                  "callsite" : [
-                     "{",
-                     "  int arr[] = {0, 1, 2, 3};",
-                     "  int c = arr[4];"
-                  ],
-                  "function_signature" : "void ()",
-                  "file" : "test.c"
-               },
-               "module_address" : "/tmp/test (.text)+0xf8648",
-               "module" : "/tmp/test",
-               "address" : 5317336,
-               "relative_address" : 1017416
-            },
-            {
-               "relative_address" : 1017658,
-               "module_address" : "/tmp/test (.text)+0xf873a",
-               "module" : "/tmp/test",
-               "address" : 5317578,
-               "symbol" : {
-                  "function_signature" : "int ()",
-                  "function_line" : 29,
-                  "callsite" : [
-                     "  fprintf(stderr, \"Executing!\\n\");",
-                     "  //crash_fpe();",
-                     "  bad_read();"
-                  ],
-                  "file" : "test.c",
-                  "function_name" : "main",
-                  "line" : 33,
-                  "mangled_function_name" : "main"
-               }
-            }
-         ],
-         "registers" : [
-            {
-               "value" : 0,
-               "size" : 8,
-               "name" : "rax",
-               "pretty_value" : "0",
-               "type" : "int64_t"
-            },
-            {
-               "name" : "rbx",
-               "size" : 8,
-               "value" : 20632632,
-               "type" : "int64_t",
-               "pretty_value" : "20632632"
-            },
-            {
-               "value" : 140737335525303,
-               "size" : 8,
-               "name" : "rcx",
-               "pretty_value" : "140737335525303",
-               "type" : "int64_t"
-            },
-            {
-               "type" : "int64_t",
-               "pretty_value" : "0",
-               "name" : "rdx",
-               "size" : 8,
-               "value" : 0
-            },
-            {
-               "value" : 140737488339648,
-               "size" : 8,
-               "name" : "rsi",
-               "type" : "int64_t",
-               "pretty_value" : "140737488339648"
-            },
-            {
-               "name" : "rdi",
-               "size" : 8,
-               "value" : 2,
-               "type" : "int64_t",
-               "pretty_value" : "2"
-            },
-            {
-               "type" : "*1",
-               "pretty_value" : "0x13ad438 <__sanitizer::CheckFailed(char const*, int, char const*, unsigned long long, unsigned long long)::num_calls>",
-               "size" : 8,
-               "value" : 20632632,
-               "name" : "rbp"
-            },
-            {
-               "pretty_value" : "0x7fffffffc2c0",
-               "type" : "*1",
-               "size" : 8,
-               "name" : "rsp",
-               "value" : 140737488339648
-            },
-            {
-               "type" : "int64_t",
-               "pretty_value" : "0",
-               "name" : "r8",
-               "size" : 8,
-               "value" : 0
-            },
-            {
-               "value" : 140737488339648,
-               "size" : 8,
-               "name" : "r9",
-               "type" : "int64_t",
-               "pretty_value" : "140737488339648"
-            },
-            {
-               "type" : "int64_t",
-               "pretty_value" : "8",
-               "size" : 8,
-               "value" : 8,
-               "name" : "r10"
-            },
-            {
-               "size" : 8,
-               "name" : "r11",
-               "value" : 582,
-               "type" : "int64_t",
-               "pretty_value" : "582"
-            },
-            {
-               "value" : 140737488340486,
-               "size" : 8,
-               "name" : "r12",
-               "type" : "int64_t",
-               "pretty_value" : "140737488340486"
-            },
-            {
-               "size" : 8,
-               "name" : "r13",
-               "value" : 12242368,
-               "type" : "int64_t",
-               "pretty_value" : "12242368"
-            },
-            {
-               "value" : 140737488343728,
-               "size" : 8,
-               "name" : "r14",
-               "pretty_value" : "140737488343728",
-               "type" : "int64_t"
-            },
-            {
-               "value" : 4,
-               "size" : 8,
-               "name" : "r15",
-               "pretty_value" : "4",
-               "type" : "int64_t"
-            },
-            {
-               "size" : 8,
-               "value" : 140737335525303,
-               "name" : "rip",
-               "type" : "*1",
-               "pretty_value" : "0x7ffff6e3ffb7 <__GI_raise+199>"
-            },
-            {
-               "value" : 582,
-               "size" : 4,
-               "name" : "eflags",
-               "type" : "i386_eflags",
-               "pretty_value" : "[ PF ZF IF ]"
-            },
-            {
-               "pretty_value" : "51",
-               "type" : "int32_t",
-               "size" : 4,
-               "value" : 51,
-               "name" : "cs"
-            },
-            {
-               "pretty_value" : "43",
-               "type" : "int32_t",
-               "size" : 4,
-               "value" : 43,
-               "name" : "ss"
-            },
-            {
-               "value" : 0,
-               "size" : 4,
-               "name" : "ds",
-               "type" : "int32_t",
-               "pretty_value" : "0"
-            },
-            {
-               "type" : "int32_t",
-               "pretty_value" : "0",
-               "value" : 0,
-               "size" : 4,
-               "name" : "es"
-            },
-            {
-               "size" : 4,
-               "value" : 0,
-               "name" : "fs",
-               "pretty_value" : "0",
-               "type" : "int32_t"
-            },
-            {
-               "type" : "int32_t",
-               "pretty_value" : "0",
-               "size" : 4,
-               "name" : "gs",
-               "value" : 0
-            }
-         ],
-         "tid" : 1,
-         "current_instruction" : "mov    rcx,QWORD PTR [rsp+0x108]"
-      },
-      "stop_info" : {
-         "signal_code" : -6,
-         "signal_name" : "SIGABRT",
-         "signal_number" : 6
-      },
-      "arch_info" : {
-         "architecture" : "i368:x86-64",
-         "address_bits" : 64
-      }
+{  "response": {
+     "result" : "SUCCESS",
+     "context" : {
+        "primary_thread" : {
+           "backtrace" : [
+              {
+                 "relative_address" : 257975,
+                 "module_address" : "/lib/x86_64-linux-gnu/libc-2.27.so+0x3efb7",
+                 "module" : "/lib/x86_64-linux-gnu/libc-2.27.so",
+                 "address" : 140737335525303,
+                 "symbol" : {
+                    "file" : "/lib/x86_64-linux-gnu/libc.so.6",
+                    "function_name" : "raise"
+                 }
+              },
+              {
+                 "symbol" : {
+                    "function_name" : "abort",
+                    "file": "/lib/x86_64-linux-gnu/libc.so.6"
+                 },
+                 "module_address" : "/lib/x86_64-linux-gnu/libc-2.27.so+0x40921",
+                 "address" : 140737335531809,
+                 "module" : "/lib/x86_64-linux-gnu/libc-2.27.so",
+                 "relative_address" : 264481
+              },
+              {
+                 "module_address" : "/tmp/test (.text)+0xe95eb",
+                 "module" : "/tmp/test",
+                 "address" : 5255803,
+                 "symbol" : {
+                    "function_name" : "__sanitizer::Abort()"
+                 },
+                 "relative_address" : 955883
+              },
+              {
+                 "symbol" : {
+                    "function_name" : "__sanitizer::Die()"
+                 },
+                 "module_address" : "/tmp/test (.text)+0xe6918",
+                 "module" : "/tmp/test",
+                 "address" : 5244328,
+                 "relative_address" : 944408
+              },
+              {
+                 "relative_address" : 822173,
+                 "address" : 5122093,
+                 "module_address" : "/tmp/test (.text)+0xc8b9d",
+                 "module" : "/tmp/test",
+                 "symbol" : {
+                    "function_name" : "__asan::ReportGenericError(unsigned long, unsigned long, unsigned long, unsigned long, bool, unsigned long, unsigned int, bool)"
+                 }
+              },
+              {
+                 "symbol" : {
+                    "function_name" : "__asan_report_load4"
+                 },
+                 "address" : 5124120,
+                 "module_address" : "/tmp/test (.text)+0xc9388",
+                 "module" : "/tmp/test",
+                 "relative_address" : 824200
+              },
+              {
+                 "symbol" : {
+                    "mangled_function_name" : "bad_read",
+                    "line" : 20,
+                    "locals" : [
+                       {
+                          "type" : "int [4]",
+                          "name" : "arr",
+                          "value" : "{0, 1, 2, 3}"
+                       },
+                       {
+                          "type" : "int",
+                          "value" : "0",
+                          "name" : "c"
+                       }
+                    ],
+                    "function_name" : "bad_read",
+                    "function_line" : 17,
+                    "callsite" : [
+                       "{",
+                       "  int arr[] = {0, 1, 2, 3};",
+                       "  int c = arr[4];"
+                    ],
+                    "function_signature" : "void ()",
+                    "file" : "test.c"
+                 },
+                 "module_address" : "/tmp/test (.text)+0xf8648",
+                 "module" : "/tmp/test",
+                 "address" : 5317336,
+                 "relative_address" : 1017416
+              },
+              {
+                 "relative_address" : 1017658,
+                 "module_address" : "/tmp/test (.text)+0xf873a",
+                 "module" : "/tmp/test",
+                 "address" : 5317578,
+                 "symbol" : {
+                    "function_signature" : "int ()",
+                    "function_line" : 29,
+                    "callsite" : [
+                       "  fprintf(stderr, \"Executing!\\n\");",
+                       "  //crash_fpe();",
+                       "  bad_read();"
+                    ],
+                    "file" : "test.c",
+                    "function_name" : "main",
+                    "line" : 33,
+                    "mangled_function_name" : "main",
+                    "args": [
+                      {
+                        "name": "argc",
+                        "type": "int",
+                        "value": "1"
+                      },
+                      {
+                        "name": "argv",
+                        "type": "char *[]",
+                        "value": "0x1234"
+                      }
+                    ]
+                 }
+              }
+           ],
+           "registers" : [
+              {
+                 "value" : 0,
+                 "size" : 8,
+                 "name" : "rax",
+                 "pretty_value" : "0",
+                 "type" : "int64_t"
+              },
+              {
+                 "name" : "rbx",
+                 "size" : 8,
+                 "value" : 20632632,
+                 "type" : "int64_t",
+                 "pretty_value" : "20632632"
+              },
+              {
+                 "value" : 140737335525303,
+                 "size" : 8,
+                 "name" : "rcx",
+                 "pretty_value" : "140737335525303",
+                 "type" : "int64_t"
+              },
+              {
+                 "type" : "int64_t",
+                 "pretty_value" : "0",
+                 "name" : "rdx",
+                 "size" : 8,
+                 "value" : 0
+              },
+              {
+                 "value" : 140737488339648,
+                 "size" : 8,
+                 "name" : "rsi",
+                 "type" : "int64_t",
+                 "pretty_value" : "140737488339648"
+              },
+              {
+                 "name" : "rdi",
+                 "size" : 8,
+                 "value" : 2,
+                 "type" : "int64_t",
+                 "pretty_value" : "2"
+              },
+              {
+                 "type" : "",
+                 "pretty_value" : "0x13ad438 <__sanitizer::CheckFailed(char const*, int, char const*, unsigned long long, unsigned long long)::num_calls>",
+                 "size" : 8,
+                 "value" : 20632632,
+                 "name" : "rbp"
+              },
+              {
+                 "pretty_value" : "0x7fffffffc2c0",
+                 "type" : "",
+                 "size" : 8,
+                 "name" : "rsp",
+                 "value" : 140737488339648
+              },
+              {
+                 "type" : "int64_t",
+                 "pretty_value" : "0",
+                 "name" : "r8",
+                 "size" : 8,
+                 "value" : 0
+              },
+              {
+                 "value" : 140737488339648,
+                 "size" : 8,
+                 "name" : "r9",
+                 "type" : "int64_t",
+                 "pretty_value" : "140737488339648"
+              },
+              {
+                 "type" : "int64_t",
+                 "pretty_value" : "8",
+                 "size" : 8,
+                 "value" : 8,
+                 "name" : "r10"
+              },
+              {
+                 "size" : 8,
+                 "name" : "r11",
+                 "value" : 582,
+                 "type" : "int64_t",
+                 "pretty_value" : "582"
+              },
+              {
+                 "value" : 140737488340486,
+                 "size" : 8,
+                 "name" : "r12",
+                 "type" : "int64_t",
+                 "pretty_value" : "140737488340486"
+              },
+              {
+                 "size" : 8,
+                 "name" : "r13",
+                 "value" : 12242368,
+                 "type" : "int64_t",
+                 "pretty_value" : "12242368"
+              },
+              {
+                 "value" : 140737488343728,
+                 "size" : 8,
+                 "name" : "r14",
+                 "pretty_value" : "140737488343728",
+                 "type" : "int64_t"
+              },
+              {
+                 "value" : 4,
+                 "size" : 8,
+                 "name" : "r15",
+                 "pretty_value" : "4",
+                 "type" : "int64_t"
+              },
+              {
+                 "size" : 8,
+                 "value" : 140737335525303,
+                 "name" : "rip",
+                 "type" : "",
+                 "pretty_value" : "0x7ffff6e3ffb7 <raise+199>"
+              },
+              {
+                 "value" : 582,
+                 "size" : 4,
+                 "name" : "eflags",
+                 "type" : "i386_eflags",
+                 "pretty_value" : "[ PF ZF IF ]"
+              },
+              {
+                 "pretty_value" : "51",
+                 "type" : "int32_t",
+                 "size" : 4,
+                 "value" : 51,
+                 "name" : "cs"
+              },
+              {
+                 "pretty_value" : "43",
+                 "type" : "int32_t",
+                 "size" : 4,
+                 "value" : 43,
+                 "name" : "ss"
+              },
+              {
+                 "value" : 0,
+                 "size" : 4,
+                 "name" : "ds",
+                 "type" : "int32_t",
+                 "pretty_value" : "0"
+              },
+              {
+                 "type" : "int32_t",
+                 "pretty_value" : "0",
+                 "value" : 0,
+                 "size" : 4,
+                 "name" : "es"
+              },
+              {
+                 "size" : 4,
+                 "value" : 0,
+                 "name" : "fs",
+                 "pretty_value" : "0",
+                 "type" : "int32_t"
+              },
+              {
+                 "type" : "int32_t",
+                 "pretty_value" : "0",
+                 "size" : 4,
+                 "name" : "gs",
+                 "value" : 0
+              }
+           ],
+           "tid" : 1,
+           "current_instruction" : "mov    rcx,QWORD PTR [rsp+0x108]"
+        },
+        "stop_info" : {
+           "signal_code" : -6,
+           "signal_name" : "SIGABRT",
+           "signal_number" : 6
+        },
+        "arch_info" : {
+           "architecture" : "i368:x86-64",
+           "address_bits" : 64
+        }
+     }
+   },
+   "child": {
+     "stdout": "",
+     "stderr": "Executing!\n=================================================================\n==29964==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7fffffffd2b0 at pc 0x0000005122d8 bp 0x7fffffffd270 sp 0x7fffffffd268\nREAD of size 4 at 0x7fffffffd2b0 thread T0\n    #0 0x5122d7 in bad_read /tmp/test.c:20\n    #1 0x5123c9 in main /tmp/test.c:33\n    #2 0x7ffff6e22bf6 in __libc_start_main /build/glibc-S9d2JN/glibc-2.27/csu/../csu/libc-start.c:310\n    #3 0x419d49 in _start ??:?\n\nAddress 0x7fffffffd2b0 is located in stack of thread T0 at offset 48 in frame\n    #0 0x5121af in bad_read /tmp/test.c:18\n\n  This frame has 1 object(s):\n    [32, 48) 'arr' (line 19) <== Memory access at offset 48 overflows this variable\nHINT: this may be a false positive if your program uses some custom stack unwind mechanism or swapcontext\n      (longjmp and C++ exceptions *are* supported)\nSUMMARY: AddressSanitizer: stack-buffer-overflow /tmp/test.c:20 in bad_read\nShadow bytes around the buggy address:\n  0x10007fff7a00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n  0x10007fff7a10: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n  0x10007fff7a20: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n  0x10007fff7a30: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n  0x10007fff7a40: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n=>0x10007fff7a50: f1 f1 f1 f1 00 00[f3]f3 00 00 00 00 00 00 00 00\n  0x10007fff7a60: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n  0x10007fff7a70: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n  0x10007fff7a80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n  0x10007fff7a90: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n  0x10007fff7aa0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\nShadow byte legend (one shadow byte represents 8 application bytes):\n  Addressable:           00\n  Partially addressable: 01 02 03 04 05 06 07 \n  Heap left redzone:       fa\n  Freed heap region:       fd\n  Stack left redzone:      f1\n  Stack mid redzone:       f2\n  Stack right redzone:     f3\n  Stack after return:      f5\n  Stack use after scope:   f8\n  Global redzone:          f9\n  Global init order:       f6\n  Poisoned by user:        f7\n  Container overflow:      fc\n  Array cookie:            ac\n  Intra object redzone:    bb\n  ASan internal:           fe\n  Left alloca redzone:     ca\n  Right alloca redzone:    cb\n==29964==ABORTING\n"
    }
 }

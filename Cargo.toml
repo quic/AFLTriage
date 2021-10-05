@@ -32,3 +32,6 @@ num_cpus = "1.0"
 log = "0"
 signal-hook = "0"
 env_logger = { version = "0", features = ["termcolor"] }
+
+[dev-dependencies]
+pretty_assertions = "1"

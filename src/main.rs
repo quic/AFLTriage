@@ -162,7 +162,7 @@ enum TriageResult {
     Timedout,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReportEnvelope {
     command_line: Vec<String>,
     testcase: String,
@@ -178,7 +178,7 @@ struct RenderedReport {
     extension: &'static str,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReportOptions {
     pub show_child_output: bool,
     pub child_output_lines: usize,

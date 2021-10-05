@@ -103,7 +103,7 @@ pub struct EnrichedFrameInfo {
     pub source_context: Option<Vec<EnrichedSourceContext>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct EnrichedLinuxStopInfo {
     /// An summary of the stop info
     pub summary: String,
@@ -120,7 +120,7 @@ pub struct EnrichedLinuxStopInfo {
     pub faulting_address: Option<AddressView>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct EnrichedTriageInfo {
     /// A summary of the triage in sentence form
     pub summary: String,
@@ -287,7 +287,7 @@ fn build_thread_info(arch_info: &GdbArchInfo, thread: &GdbThread) -> EnrichedThr
     }
 }
 
-fn build_reference_list<T>(needles: &HashMap<&str, Rc<T>>, haystack: Vec<&str>) -> Vec<Rc<T>> {
+fn build_reference_list<T>(needles: &HashMap<&str, Rc<T>>, haystack: Vec<&str>) -> Option<Vec<Rc<T>>> {
     let mut found: Vec<Rc<T>> = vec![];
     let mut seen: HashSet<&str> = HashSet::new();
 
@@ -301,13 +301,17 @@ fn build_reference_list<T>(needles: &HashMap<&str, Rc<T>>, haystack: Vec<&str>) 
         }
     }
 
-    found
+    if found.is_empty() {
+        None
+    } else {
+        Some(found)
+    }
 }
 
 fn build_instruction_context(arch_info: &GdbArchInfo, regs: &Option<Vec<Rc<GdbRegister>>>, insn: String, addr: u64) -> EnrichedInstructionContext {
     let referenced_regs = if let Some(regs) = regs {
         let reg_map : HashMap<_, _> = regs.iter().map(|v| (v.name.as_str(), Rc::clone(v))).collect();
-        Some(build_reference_list(&reg_map, vec![&insn]))
+        build_reference_list(&reg_map, vec![&insn])
     } else {
         None
     };
@@ -337,8 +341,8 @@ fn build_source_context(arch_info: &GdbArchInfo, symbol: &Rc<GdbSymbol>) -> Opti
 
     for (i, code) in lines.iter().enumerate() {
         let line_no = (start_line as usize) - lines.len() + i + 1;
-        let referenced_locals = locals_map.as_ref().map(|m| build_reference_list(m, vec![&code]));
-        let referenced_args = args_map.as_ref().map(|m| build_reference_list(m, vec![&code]));
+        let referenced_locals = locals_map.as_ref().map(|m| build_reference_list(m, vec![&code])).flatten();
+        let referenced_args = args_map.as_ref().map(|m| build_reference_list(m, vec![&code])).flatten();
 
         let references = match (referenced_locals, referenced_args) {
             (Some(l), Some(a)) => Some(l.into_iter().chain(a).collect()),
@@ -412,5 +416,70 @@ fn build_stop_info(arch: &GdbArchInfo, stop_info: &GdbStopInfo) -> EnrichedLinux
         signal_code_name: si_code_name,
         signal_code: stop_info.signal_code,
         faulting_address,
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use crate::bucket::{CrashBucketInfo, CrashBucketStrategy};
+    use crate::{ReportOptions, ReportEnvelope};
+    use pretty_assertions::assert_eq;
+
+    fn load_test(p: &str) -> String {
+        std::str::from_utf8(
+            &crate::util::read_file_to_bytes(test_path(p).to_str().unwrap()).unwrap()
+        ).unwrap().to_string()
+    }
+
+    fn test_path(p: &str) -> PathBuf {
+        let mut path = PathBuf::from(file!());
+        path.pop();
+        path.push("res");
+        path.push("test_report_text");
+        path.push(p);
+        path
+    }
+
+    #[test]
+    fn test_enriched_report() {
+        let triage: GdbTriageResult = serde_json::from_str(&load_test("asan_stack_bof.rawjson")).unwrap();
+        let mut envelope_value: serde_json::Value = serde_json::from_str(&load_test("asan_stack_bof.json")).unwrap();
+        let etriage_golden: EnrichedTriageInfo = serde_json::from_value(
+            envelope_value.get_mut("report").unwrap().take()
+        ).unwrap();
+
+        let report_options = ReportOptions {
+            show_child_output: true,
+            child_output_lines: 25,
+        };
+
+        let envelope: ReportEnvelope = serde_json::from_value(envelope_value).unwrap();
+
+        assert_eq!(ReportEnvelope {
+                        command_line: vec!["./test".into(), "@@".into()],
+                        testcase: "test.c".into(),
+                        debugger: "gdb".into(),
+                        bucket: CrashBucketInfo {
+                            inputs: vec![
+                              "/lib/x86_64-linux-gnu/libc-2.27.so+0x3efb7".into(),
+                              "/lib/x86_64-linux-gnu/libc-2.27.so+0x40921".into(),
+                              "/tmp/test (.text)+0xe95eb".into(),
+                              "/tmp/test (.text)+0xe6918".into(),
+                              "/tmp/test (.text)+0xc8b9d".into(),
+                              "/tmp/test (.text)+0xc9388".into(),
+                              "test.c:20".into(),
+                              "test.c:33".into(),
+                            ],
+                            strategy: CrashBucketStrategy::afltriage,
+                            strategy_result: "e7a73ec00e0f0d990e5a753f8f942622".into(),
+                        },
+                        report_options: report_options.clone(),
+                    }, envelope);
+
+        let etriage = enrich_triage_info(&report_options, &triage).unwrap();
+
+        assert_eq!(etriage_golden, etriage);
     }
 }

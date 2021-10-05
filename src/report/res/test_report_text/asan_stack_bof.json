@@ -155,7 +155,6 @@
             {
               "file": "test.c",
               "line_no": 18,
-              "references": [],
               "source": "{"
             },
             {
@@ -190,28 +189,11 @@
           ],
           "summary": "0x00000000005122d8 in bad_read (/tmp/test)",
           "symbol": {
-            "callsite": [
-              "{",
-              "  int arr[] = {0, 1, 2, 3};",
-              "  int c = arr[4];"
-            ],
             "file": "test.c",
             "function_line": 17,
             "function_name": "bad_read",
             "function_signature": "void ()",
             "line": 20,
-            "locals": [
-              {
-                "name": "arr",
-                "type": "int [4]",
-                "value": "{0, 1, 2, 3}"
-              },
-              {
-                "name": "c",
-                "type": "int",
-                "value": "0"
-              }
-            ],
             "mangled_function_name": "bad_read"
           }
         },
@@ -247,11 +229,6 @@
           ],
           "summary": "0x00000000005123ca in main (/tmp/test)",
           "symbol": {
-            "callsite": [
-              "  fprintf(stderr, \"Executing!\\n\");",
-              "  //crash_fpe();",
-              "  bad_read();"
-            ],
             "file": "test.c",
             "function_line": 29,
             "function_name": "main",
@@ -494,7 +471,7 @@
     },
     "summary": "ASAN detected stack-buffer-overflow in bad_read after a READ leading to SIGABRT (si_signo=6) / SI_TKILL (si_code=-6)",
     "target_output": {
-      "stderr": "Executing!\n<Replaced AddressSanitizer Report>\n",
+      "stderr": "Executing!\n<Replaced ASAN Report>\n",
       "stdout": ""
     },
     "terse_summary": "ASAN_stack-buffer-overflow_READ_bad_read"
