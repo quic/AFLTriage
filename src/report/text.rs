@@ -113,7 +113,7 @@ fn build_text_report(einfo: &EnrichedTriageInfo, envelope: &ReportEnvelope) -> T
     let mut child_output = TextReportSection::new("".into());
 
     header.add_line(format!(
-        "Summary: {}\nCommand line: {}\nTestcase: {}\nStack hash: {}",
+        "Summary: {}\nCommand line: {}\nTestcase: {}\nCrash bucket: {}",
         einfo.summary, envelope.command_line.join(" "), envelope.testcase, envelope.bucket.strategy_result,
     ));
 

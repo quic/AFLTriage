@@ -1,7 +1,7 @@
 Summary: ASAN detected stack-buffer-overflow in bad_read after a READ leading to SIGABRT (si_signo=6) / SI_TKILL (si_code=-6)
 Command line: ./test @@
 Testcase: test.c
-Stack hash: e7a73ec00e0f0d990e5a753f8f942622
+Crash bucket: e7a73ec00e0f0d990e5a753f8f942622
 
 Crashing thread backtrace:
 #0  0x00007ffff6e3ffb7 in raise (/lib/x86_64-linux-gnu/libc-2.27.so)
