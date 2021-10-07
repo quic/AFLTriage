@@ -1,10 +1,37 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
+//! Built-in methods to cluster crashes during the triage process.
+//!
+//! This clustering, also known as crash deduplication or crash bucketing, can help save time
+//! triaging crash reports (as there will be less reports).  There are many tools that offer some
+//! form of crash deduplication, such as Exploitable, Honggfuzz, CERT BFF, and more. Each has their
+//! own techniques (or strategies) they employ, many of which are based around stack hashing.
+//! AFLTriage draws upon previous work and builds in some simple strategies out of the box.
+//!
+//! ## Strategies
+//! * [CrashBucketStrategy::none] - Do not use crash bucketing at all. Treat all crashes as new
+//! findings.
+//! * [CrashBucketStrategy::afltriage] - An opinionated strategy that uses either symbol
+//! (file:line) or address information starting at the "first interesting frame" as bucket inputs.
+//! * [CrashBucketStrategy::first_frame] - The same as `afltriage` but only consider the first
+//! interesting frame.
+//! * [CrashBucketStrategy::first_frame_raw] - Only use the address of the first raw (non-heuristicly determined) frame
+//! * [CrashBucketStrategy::first_5_frames] - The same as `afltriage` but only consider the first
+//! five interesting frames.
+//! * [CrashBucketStrategy::function_names] - Only use the function names without offsets (or addresses if not
+//! available)
+//! * [CrashBucketStrategy::first_function_name] - The same as `function_names` but only the first
+//! frame's function name
+//!
+//! Accurate crash bucketing is an active research area and is usually somewhat target specific. Many strategies are a heuristic at best.
+//! This could lead to you missing truly unique crashes (false negative) or having many duplicate
+//! crashes (false positive).
 use serde::{Deserialize, Serialize};
 use super::report::enriched::EnrichedTriageInfo;
 use clap::arg_enum;
 
+/// Information on the crash bucketing strategy, inputs, and output
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct CrashBucketInfo {
     /// What is the stringified output from the bucketing function
@@ -16,6 +43,7 @@ pub struct CrashBucketInfo {
 }
 
 arg_enum! {
+    /// The built-in crash deduplication (crash bucketing) method (strategy) to use
     #[derive(Debug, PartialEq, Serialize, Deserialize)]
     #[allow(non_camel_case_types)]
     pub enum CrashBucketStrategy {
@@ -31,16 +59,18 @@ arg_enum! {
     }
 }
 
+/// Using [EnrichedTriageInfo] and a [CrashBucketStrategy], determine a unique string output that
+/// attempts to captures the uniqueness of a crash.
 pub fn bucket_crash(strategy: CrashBucketStrategy, einfo: &EnrichedTriageInfo) -> CrashBucketInfo {
     let max_frames = einfo.faulting_thread.frames.len();
     let (strategy_result, inputs) = match &strategy {
         CrashBucketStrategy::none => ("".into(), vec![]),
-        CrashBucketStrategy::afltriage => bucket_first_n_frames(einfo, max_frames),
-        CrashBucketStrategy::first_frame => bucket_first_n_frames(einfo, 1),
-        CrashBucketStrategy::first_frame_raw => bucket_first_n_frames_raw(einfo, 1),
+        CrashBucketStrategy::afltriage => bucket_n_frames(einfo, max_frames),
+        CrashBucketStrategy::first_frame => bucket_n_frames(einfo, 1),
+        CrashBucketStrategy::first_frame_raw => bucket_n_frames_raw(einfo, 1),
         CrashBucketStrategy::function_names => bucket_n_function_names(einfo, max_frames),
         CrashBucketStrategy::first_function_name => bucket_n_function_names(einfo, 1),
-        CrashBucketStrategy::first_5_frames => bucket_first_n_frames(einfo, 5),
+        CrashBucketStrategy::first_5_frames => bucket_n_frames(einfo, 5),
     };
 
     CrashBucketInfo {
@@ -50,7 +80,8 @@ pub fn bucket_crash(strategy: CrashBucketStrategy, einfo: &EnrichedTriageInfo) -
     }
 }
 
-fn bucket_first_n_frames(einfo: &EnrichedTriageInfo, n: usize) -> (String, Vec<String>) {
+/// Bucket the first guessed `n` frames
+fn bucket_n_frames(einfo: &EnrichedTriageInfo, n: usize) -> (String, Vec<String>) {
     let mut hash = md5::Context::new();
     let mut inputs = get_frame_signatures(einfo);
 
@@ -63,6 +94,7 @@ fn bucket_first_n_frames(einfo: &EnrichedTriageInfo, n: usize) -> (String, Vec<S
     (format!("{:x}", hash.compute()), inputs)
 }
 
+/// Bucket using the first `n` function names
 fn bucket_n_function_names(einfo: &EnrichedTriageInfo, n: usize) -> (String, Vec<String>) {
     let mut hash = md5::Context::new();
     let mut inputs = vec![];
@@ -89,7 +121,8 @@ fn bucket_n_function_names(einfo: &EnrichedTriageInfo, n: usize) -> (String, Vec
     (format!("{:x}", hash.compute()), inputs)
 }
 
-fn bucket_first_n_frames_raw(einfo: &EnrichedTriageInfo, n: usize) -> (String, Vec<String>) {
+/// Bucket the first true `n` frames
+fn bucket_n_frames_raw(einfo: &EnrichedTriageInfo, n: usize) -> (String, Vec<String>) {
     let mut hash = md5::Context::new();
     let mut inputs = get_raw_frame_signatures(einfo);
 
@@ -102,6 +135,8 @@ fn bucket_first_n_frames_raw(einfo: &EnrichedTriageInfo, n: usize) -> (String, V
     (format!("{:x}", hash.compute()), inputs)
 }
 
+/// Get frame signatures (file:line, module+offset, or address) starting from the guessed faulting
+/// frame, or if not available, the first true frame
 fn get_frame_signatures(einfo: &EnrichedTriageInfo) -> Vec<String> {
     let mut inputs = vec![];
 
@@ -134,6 +169,7 @@ fn get_frame_signatures(einfo: &EnrichedTriageInfo) -> Vec<String> {
     inputs
 }
 
+/// Get the "raw" frame signatures, which is just their address in string form
 fn get_raw_frame_signatures(einfo: &EnrichedTriageInfo) -> Vec<String> {
     let mut inputs = vec![];
 

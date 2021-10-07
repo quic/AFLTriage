@@ -1,6 +1,11 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
+//! GNU Debugger (GDB) triage functionality
+//!
+//! This relies on the GDBTriage python script (see `res/GDBTriage.py`) to capture and serialize
+//! data from GDB to JSON. No interactive usage with GDB is supported. Note that GDBTriage.py can
+//! be useful independent of AFLTriage.
 use serde::{Deserialize, Serialize};
 use std::io::{ErrorKind, Write};
 use std::path::PathBuf;
@@ -8,35 +13,49 @@ use std::rc::Rc;
 
 use crate::process::{self, ChildResult};
 
+#[doc(hidden)]
+/// The built-in GDBTriage python script
 const INTERNAL_TRIAGE_SCRIPT: &[u8] = include_bytes!("./res/GDBTriage.py");
 
+/// Symbol information for frame
 #[derive(Debug, Serialize, PartialEq, Deserialize)]
 pub struct GdbSymbol {
+    /// The demangled function name
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function_name: Option<String>,
+    /// The line of the start of the function
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function_line: Option<i64>,
+    /// A mangled function name, if available
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mangled_function_name: Option<String>,
+    /// A function's type signature
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function_signature: Option<String>,
+    /// One or more lines of code surrounding the frame address
     #[serde(skip_serializing_if = "Option::is_none")]
     pub callsite: Option<Vec<String>>,
+    /// The file of the frame address
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
+    /// The source line of the frame address
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<i64>,
+    /// Frame function arguments
     #[serde(skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<Rc<GdbVariable>>>,
+    /// Frame local variables
     #[serde(skip_serializing_if = "Option::is_none")]
     pub locals: Option<Vec<Rc<GdbVariable>>>,
 }
 
 impl GdbSymbol {
+    /// Short hand for [GdbSymbol::format_short]
     pub fn format(&self) -> String {
         self.format_short()
     }
 
+    /// Just a function name or blank if not available
     pub fn format_short(&self) -> String {
         self.function_name
             .as_ref()
@@ -44,6 +63,7 @@ impl GdbSymbol {
             .to_string()
     }
 
+    /// A C-like function prototype
     pub fn format_function_prototype(&self) -> String {
         let return_type = match &self.function_signature {
             Some(rv) => match rv.find(' ') {
@@ -66,6 +86,7 @@ impl GdbSymbol {
         return format!("{}{}({})", return_type, self.format_short(), args);
     }
 
+    /// A C-like function call
     pub fn format_function_call(&self) -> String {
         let args = self.args.as_ref().map_or_else(
             || String::from("???"),
@@ -80,6 +101,7 @@ impl GdbSymbol {
         return format!("{}({})", self.format_short(), args);
     }
 
+    /// Display like file:line
     pub fn format_file(&self) -> String {
         let mut filename = String::new();
 
@@ -95,79 +117,115 @@ impl GdbSymbol {
     }
 }
 
+/// GDB variable information
 #[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GdbVariable {
+    /// The GDB type of the variable
     pub r#type: String,
+    /// Variable name
     pub name: String,
+    /// The GDB pretty string representation of the variable
     pub value: String,
 }
 
 impl GdbVariable {
+    /// Format a variable as an argument assignment with explicit cast
     pub fn format_arg(&self) -> String {
         format!("{} = ({}){}", self.name, self.r#type, self.value)
     }
 
+    /// Format a variable in a C-like fashion
     pub fn format_decl(&self) -> String {
         format!("{} {} = {};", self.r#type, self.name, self.value)
     }
 }
 
+/// Frame information
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GdbFrameInfo {
+    /// A target-native address
     pub address: u64,
+    /// The address relative to the module base
     pub relative_address: u64,
+    /// The name of the module. NOTE: can be ??, \[vdso\], \[heap\] or other depending on context.
+    /// Taken from Linux /proc/PID/mappings
     pub module: String,
+    /// An address-space unique identifier
     pub module_address: String,
+    /// GDB symbol information, if present
     #[serde(skip_serializing_if = "Option::is_none")]
     pub symbol: Option<Rc<GdbSymbol>>,
 }
 
+/// Thread information
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GdbThread {
+    /// The thread's OS ID
     pub tid: i32,
+    /// Zero or more stack frames
     pub backtrace: Vec<GdbFrameInfo>,
+    /// The current instruction where the thread stopped
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_instruction: Option<String>,
-    /// Registers are passed in the GDB defined order
+    /// The thread's register set. Registers in the GDB defined order
     #[serde(skip_serializing_if = "Option::is_none")]
     pub registers: Option<Vec<Rc<GdbRegister>>>,
 }
 
+/// A target register
 #[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GdbRegister {
+    /// Register name
     pub name: String,
+    /// The raw register value
     // TODO: what about SIMD registers larger than 64 bits?
     pub value: u64,
+    /// A formatted value from GDB
     pub pretty_value: String,
+    /// The register's GDB type
     pub r#type: String,
     /// Size in bytes
     pub size: u64,
 }
 
+/// The platform-specific stop information
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GdbStopInfo {
+    /// The Linux signal that caused a stop
     pub signal_name: String,
-    pub signal_number: i32,            // si_signo
-    pub signal_code: i32,              // si_code
+    /// The Linux signal number (`si_signo`)
+    pub signal_number: i32,
+    /// The Linux signal code (`si_code`)
+    pub signal_code: i32,
+    /// The faulting address, if relevant (`sigfault.si_addr`)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub faulting_address: Option<u64>, // sigfault.si_addr
+    pub faulting_address: Option<u64>,
 }
 
+/// GDB target architecture information
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GdbArchInfo {
+    /// The target address with in bits
     pub address_bits: usize,
+    /// GDB's architecture string for the target
     pub architecture: String,
 }
 
+/// The stop context information from GDBTriage
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GdbContextInfo {
+    /// Platform-specific stop info
     pub stop_info: GdbStopInfo,
+    /// Architecture information
     pub arch_info: GdbArchInfo,
+    /// The primary (or faulting) thread that caused a process stop
     pub primary_thread: GdbThread,
+    /// Other process threads (not currently supported)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub other_threads: Option<Vec<GdbThread>>,
 }
 
+/// The result code from GDBTriage
 #[derive(Debug, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
 pub enum GdbResultCode {
@@ -175,6 +233,7 @@ pub enum GdbResultCode {
     ERROR_TARGET_NOT_RUNNING,
 }
 
+/// The GDBTriage top-level structure
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GdbJsonResult {
     pub result: GdbResultCode,
@@ -182,18 +241,21 @@ pub struct GdbJsonResult {
     pub context: Option<GdbContextInfo>,
 }
 
+/// The top-level AFLTriage structure
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GdbTriageResult {
     pub response: GdbJsonResult,
     pub child: GdbChildOutput,
 }
 
+/// The target's output strings
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GdbChildOutput {
     pub stdout: String,
     pub stderr: String,
 }
 
+/// What type of GDBTriage error occurred
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub enum GdbTriageErrorKind {
     Command,
@@ -201,6 +263,7 @@ pub enum GdbTriageErrorKind {
     Timeout,
 }
 
+/// Information on the GDBTriage error that occurred
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct GdbTriageError {
     pub error_kind: GdbTriageErrorKind,
@@ -262,10 +325,12 @@ impl GdbTriageError {
     }
 }
 
+#[doc(hidden)]
 macro_rules! vec_of_strings {
     ($($x:expr),*) => (vec![$($x.to_string()),*]);
 }
 
+#[doc(hidden)]
 struct DbgMarker {
     start: &'static str,
     end: &'static str,
@@ -321,7 +386,9 @@ macro_rules! make_marker {
 }
 
 lazy_static! {
+    #[doc(hidden)]
     static ref MARKER_CHILD_OUTPUT: DbgMarker = make_marker!("AFLTRIAGE_CHILD_OUTPUT");
+    #[doc(hidden)]
     static ref MARKER_BACKTRACE: DbgMarker = make_marker!("AFLTRIAGE_BACKTRACE");
 }
 
@@ -331,12 +398,14 @@ enum GdbTriageScript {
     Internal(tempfile::NamedTempFile),
 }
 
+/// Triage crashes using GDB
 pub struct GdbTriager {
     triage_script: GdbTriageScript,
     pub gdb_path: String,
 }
 
 impl GdbTriager {
+    /// Create a new [GdbTriager] using the built-in GDBTriage script
     pub fn new(gdb_path: String) -> GdbTriager {
         let mut triage_script =
             GdbTriageScript::Internal(tempfile::Builder::new().suffix(".py").tempfile().unwrap());
@@ -353,6 +422,7 @@ impl GdbTriager {
         }
     }
 
+    /// Confirm that the selected GDB executable meets the requirements
     pub fn has_supported_gdb(&self) -> bool {
         let python_cmd = "python import gdb, sys; print('V:'+gdb.execute('show version', to_string=True).splitlines()[0]); print('P:'+sys.version.splitlines()[0].strip())";
         let gdb_args = vec!["--nx", "--batch", "-iex", python_cmd];
@@ -395,6 +465,10 @@ impl GdbTriager {
         true
     }
 
+    /// Execute a target program under GDB and execute GDBTriage to collect crash information, if
+    /// any.
+    ///
+    /// `show_raw_output` will display low-level triaging information which is helpful during debugging
     pub fn triage_program(
         &self,
         prog_args: &[String],

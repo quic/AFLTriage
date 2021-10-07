@@ -1,6 +1,7 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
+//! AFLTriage's native "Text" report type.
 use crate::{ReportOptions, ReportEnvelope};
 use crate::debugger::gdb::*;
 use crate::report::enriched::*;
@@ -73,6 +74,8 @@ struct TextReportSections {
     child_output: TextReportSection,
 }
 
+/// Render a text report using information from [EnrichedTriageInfo] and the corresponding
+/// [ReportEnvelope].
 pub fn format_text_report(einfo: &EnrichedTriageInfo, envelope: &ReportEnvelope) -> String {
     let sections = build_text_report(einfo, envelope);
 

@@ -1,6 +1,7 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
+//! Utilities
 use regex::Regex;
 use std::io::{self, Error, Read, BufRead};
 use std::fs;

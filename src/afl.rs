@@ -1,6 +1,7 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
+//! AFL specific handling
 use regex::Regex;
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -8,6 +9,7 @@ use std::io::{BufRead, BufReader, Error};
 use std::path::Path;
 use std::str::FromStr;
 
+/// See AFL's documentation for an explanation of these fields
 #[derive(Debug, PartialEq)]
 pub struct AflStats {
     pub start_time: u64,
@@ -54,6 +56,8 @@ pub struct AflStats {
 
 }
 
+/// Read and tokenize AFL status from the `fuzzer_stats` file present in AFL directories.
+/// Use [validate_afl_fuzzer_stats] to convert tokenized strings into [AflStats].
 pub fn parse_afl_fuzzer_stats(filename: &Path) -> Result<HashMap<String, String>, Error> {
     let re = Regex::new(r"^([^: ]+)[ ]+: (.*)$").unwrap();
     let input = File::open(filename)?;
@@ -76,6 +80,7 @@ pub fn parse_afl_fuzzer_stats(filename: &Path) -> Result<HashMap<String, String>
 }
 
 #[allow(clippy::upper_case_acronyms)]
+#[doc(hidden)]
 trait KVConverter {
     fn to_str(&self, key: &str) -> Result<String, String>;
     fn to_num<T: FromStr>(&self, key: &str) -> Result<T, String>;
@@ -120,6 +125,8 @@ impl<S: std::hash::BuildHasher> KVConverter for HashMap<String, String, S> {
     }
 }
 
+/// Validate KV pairs parsed from AFL's `fuzzer_stats` and return [AflStats] on success
+/// Some keys are required to always be present and others are wrapped in [Option].
 pub fn validate_afl_fuzzer_stats<S: std::hash::BuildHasher>(
     kv: &HashMap<String, String, S>,
 ) -> Result<AflStats, String> {

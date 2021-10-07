@@ -1,6 +1,7 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
+//! Processing and extraction of Sanitizer reports
 use serde::{Deserialize, Serialize};
 use regex::Regex;
 use std::collections::HashMap;
@@ -44,6 +45,10 @@ impl SanitizerReport {
     }
 }
 
+/// Extract key fields and body of Sanitizer reports from an `input` string.
+///
+/// Currently only supports AddressSanitizer reports and only a single report (specifically the
+/// last report) within a string.
 // TODO: support multiple sanitizer reports in successsion
 // TODO: support more sanitizers
 // FIXME: string slicing of unicode can lead to panics

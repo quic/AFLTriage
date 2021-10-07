@@ -2,8 +2,9 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 # 
-# GDB Triage to JSON Script
-# by Grant Hernandez
+# GDBTriage.py
+# Collect crash information and emit as to JSON
+# Developed for the AFLTriage project
 import sys
 import os
 
@@ -34,6 +35,7 @@ r_REGISTER_VALUES = re.compile(r"([^\s]+)\s+(0x[a-fA-F0-9]+)\s+(.*)")
 
 #### OPTIONS
 # Collect backtraces from all threads
+# TODO: make these into `gdbtriage` options
 ALL_THREADS = False
 FRAME_LIMIT=100
 

@@ -1,6 +1,45 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
+/*!
+  AFLTriage is a tool to process a target program's crashing input files using a debugger.
+
+  When fuzzing a target program, one or more crashes may be found. It is up to a developer or
+  researcher to understand their root cause and impact in order to take the appropriate action.
+  Depending on the program and platform, a debugger may be available to inspect the memory,
+  registers, and stack trace at the time of the crash. If there are many crashes or a debugger
+  takes a long time to triage a crash, using one can be quite tedious.
+
+  AFLTriage automates the process of using a [debugger](./debugger/index.html) in parallel to collect
+  additional context for a set of crashing inputs.  With crash triage data it uses strategies to
+  deduplicate (or [bucket](./bucket/index.html)) crashes to reduce the amount of reports generated.
+  Once all target and crash context is collected, AFLTriage emits [reports](./report/index.html)
+  for an analyst to look at and take action on.
+
+  Additionally when fuzzing C and C++ code, Sanitizers such as AddressSanitizer, can be enabled to
+  detect undefined behavior at the moment of occurrence, greatly improving the likelihood of
+  successfully root causing a crash. AFLTriage captures this information, if available, and uses it
+  to augment its reporting.
+
+  AFLTriage currently only supports Linux based targets and GDB.
+
+  ## AFLTriage High Level Flow
+
+  1. Environment check
+       - Debugger check: For GDB its version and Python version are checked
+       - Target exists and is executable and the command line is okay
+       - Environment variables are processed
+  1. Input categorization
+       - For each input path categorize it into: single file, directory with files, AFL directory, or AFL sync directory
+  1. Input collection
+       - Resolve all paths to input files in a stable order
+  1. Profile
+       - See how the target operates under the debugger
+  1. Triage
+       - In parallel, for each input file, triage using a debugger, process debugger data, and bucket crashes
+  1. Report
+       - With triage information, emit reports in the formats requested (text/json/raw)
+ */
 use clap::{arg_enum, App, AppSettings, Arg, ArgMatches};
 use indicatif::{ProgressBar, ProgressStyle};
 use is_executable::IsExecutable;
@@ -34,11 +73,13 @@ use debugger::gdb::*;
 use process::ChildResult;
 use bucket::{CrashBucketStrategy, CrashBucketInfo};
 
+#[doc(hidden)]
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // arg_enum! doesn't support docstrings...
 arg_enum! {
 
+    /// The output formats supported by AFLTriage
     #[derive(PartialEq, Debug)]
     // these are user controlable options so follow normal cmdline conventions
     #[allow(non_camel_case_types)]
@@ -146,6 +187,7 @@ fn setup_command_line() -> ArgMatches<'static> {
     app.get_matches()
 }
 
+/// State shared between all triage threads
 struct TriageState {
     crashed: usize,
     no_crash: usize,
@@ -155,6 +197,7 @@ struct TriageState {
     unique_errors: HashMap<GdbTriageError, usize>,
 }
 
+/// The result of a triage operation
 enum TriageResult {
     NoCrash(GdbChildOutput),
     Crash(GdbTriageResult),
@@ -162,6 +205,7 @@ enum TriageResult {
     Timedout,
 }
 
+/// Metadata for a report that can act as a wrapper around data from a debugger
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReportEnvelope {
     command_line: Vec<String>,
@@ -172,18 +216,21 @@ pub struct ReportEnvelope {
     report_options: ReportOptions,
 }
 
+/// A fully stringified report ready to be written to an output
 struct RenderedReport {
     data: String,
     format: ReportOutputFormat,
     extension: &'static str,
 }
 
+/// Options controlling the output of reports
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReportOptions {
     pub show_child_output: bool,
     pub child_output_lines: usize,
 }
 
+/// Data collected during the profiling of a target to triage crashes against
 struct ProfileResult {
     process_result: std::io::Result<ChildResult>,
     process_execution_time: Duration,
@@ -195,6 +242,12 @@ struct ProfileResult {
     debug_time_overhead: f32,
 }
 
+/// Profile a target application with and without a debugger
+///
+/// This profiling is used to inform the user of the overhead and resources required to triage a
+/// single testcase. AFLTriage uses this information to avoid causing out of memory errors on large
+/// targets under a debugger. When reading a target with signifincant debugging and symbol information,
+/// GDB can cause memory overheads significantly higher than that of a bare process.
 fn profile_target(
     gdb: &GdbTriager,
     binary_args: &[&str],
@@ -251,6 +304,7 @@ fn profile_target(
     })
 }
 
+/// Triage a single testcase using GDB and the target
 fn triage_test_case(
     gdb: &GdbTriager,
     binary_args: &[&str],
@@ -282,6 +336,7 @@ fn triage_test_case(
     }
 }
 
+/// The input type of an input path given to AFLTriage
 enum UserInputPathType {
     Unknown,
     Missing,
@@ -291,11 +346,13 @@ enum UserInputPathType {
     AflSyncDir,
 }
 
+/// A user input path with a type associated
 struct UserInputPath {
     ty: UserInputPathType,
     path: PathBuf,
 }
 
+/// A wrapper struct for defining a single testcase
 struct Testcase {
     path: PathBuf,
     /// Must be safe for filesystem
@@ -303,12 +360,14 @@ struct Testcase {
     unique_id: String,
 }
 
+/// Heuristic to see if a directory seems like an AFL directory
 fn has_afl_directory_signature(input: &Path) -> bool {
     return input.join("fuzzer_stats").exists() ||
         input.join("queue").exists() ||
         input.join("crashes").exists();
 }
 
+/// Heuristically determine what a user's input path points to
 fn determine_input_type(input: &Path) -> UserInputPathType {
     let metadata = match input.symlink_metadata() {
         Ok(meta) => meta,
@@ -337,6 +396,7 @@ fn determine_input_type(input: &Path) -> UserInputPathType {
     UserInputPathType::Unknown
 }
 
+/// Give AFLTriage the best shot at successfully triaging a target
 fn environment_check(gdb: &GdbTriager, binary_args: &[&str]) -> bool {
     let rawexe = binary_args.get(0).unwrap();
     let exe = PathBuf::from(rawexe);
@@ -405,11 +465,13 @@ fn environment_check(gdb: &GdbTriager, binary_args: &[&str]) -> bool {
     true
 }
 
+/// Crashes and stats from an AFL directory
 struct AflDirInfo {
     testcases: Vec<Testcase>,
     aflstats: Option<AflStats>,
 }
 
+/// Collect the paths to crashes found by AFL and read the fuzzer_stats
 fn collect_afl_crashes_from_dir(path: &Path) -> Option<AflDirInfo> {
     let mut testcases = vec![];
     let path_str = path.to_str().unwrap();
@@ -460,6 +522,7 @@ fn collect_afl_crashes_from_dir(path: &Path) -> Option<AflDirInfo> {
     })
 }
 
+/// With determined [UserInputPath]s, extract all files from the paths into [Testcase]s
 fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Testcase> {
     let mut all_testcases = Vec::new();
 
@@ -593,20 +656,6 @@ fn main() {
 }
 
 fn main_wrapper() -> i32 {
-    /* AFLTriage High Level Flow
-     *
-     * 1. Environment check: gdb python, binary exists, cmdline okay
-     * 2. Input processing: for each input path determine single file, dir with files, afl dir single, afl
-     *    dir primary/secondaries
-     *      - Reject AFL dirs for multiple different fuzzer instances and provide guidance for this
-     * 3. Input collection: resolve all paths to input files in a stable order
-     * 4. Triaging: collect triage info in parallel, process it, bucket crashes
-     * 5. Reporting: format triage information into reports
-     *      - Write reports in the formats requested (text/json/raw)
-     *
-     * That's really...it. Seems simple, but it's the details that requires a lot of code.
-     */
-
     let args = setup_command_line();
 
     println!("AFLTriage v{} by Grant Hernandez\n", VERSION);

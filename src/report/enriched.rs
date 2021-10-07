@@ -1,6 +1,12 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
+//! AFLTriage's native "Enriched" report type.
+//!
+//! Enriched reports start with [EnrichedTriageInfo], which contains a crash summary, stop
+//! information, faulting frame info, sanitizer reports (if any), and target output.
+//!
+//! This report style can be serizalized to JSON.
 use std::cmp;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -17,6 +23,7 @@ lazy_static! {
     static ref R_CIDENT: Regex = Regex::new(r#"[_a-zA-Z][_a-zA-Z0-9]{0,30}"#).unwrap();
 }
 
+/// A container for target addresses
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct AddressView {
     /// The raw numbered value. Should be enough size to hold addresses for the architecture
@@ -37,6 +44,7 @@ impl AddressView {
     }
 }
 
+/// Context information for a single target instruction
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct EnrichedInstructionContext {
     /// The address of the instruction
@@ -50,6 +58,7 @@ pub struct EnrichedInstructionContext {
     // TODO: support memory references?
 }
 
+/// Context information for a single source line
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct EnrichedSourceContext {
     /// The source file
@@ -63,6 +72,7 @@ pub struct EnrichedSourceContext {
     pub references: Option<Vec<Rc<GdbVariable>>>,
 }
 
+/// Triage information for a single target thread
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct EnrichedThreadInfo {
     /// Frames extracted from a thread's backtrace
@@ -76,12 +86,14 @@ pub struct EnrichedThreadInfo {
     pub instruction_context: Option<Vec<EnrichedInstructionContext>>,
 }
 
+/// Output from the target
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct EnrichedTargetOutput {
     pub stdout: String,
     pub stderr: String,
 }
 
+/// Information for a single target thread's stack frame
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct EnrichedFrameInfo {
     /// A summary of the frame using the below fields
@@ -103,6 +115,7 @@ pub struct EnrichedFrameInfo {
     pub source_context: Option<Vec<EnrichedSourceContext>>,
 }
 
+/// Linux stop information for a target thread
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct EnrichedLinuxStopInfo {
     /// An summary of the stop info
@@ -120,6 +133,7 @@ pub struct EnrichedLinuxStopInfo {
     pub faulting_address: Option<AddressView>,
 }
 
+/// The top-level container for crash triage information
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct EnrichedTriageInfo {
     /// A summary of the triage in sentence form
@@ -148,6 +162,8 @@ pub struct EnrichedTriageInfo {
     pub target_output: Option<EnrichedTargetOutput>,
 }
 
+/// With [ReportOptions] `opt` translate raw debugger triage information ([GdbTriageResult]) into
+/// the native [EnrichedTriageInfo] format.
 pub fn enrich_triage_info(opt: &ReportOptions, triage_result: &GdbTriageResult) -> Result<EnrichedTriageInfo, &'static str> {
     let ctx_info: &GdbContextInfo = triage_result.response.context.as_ref().unwrap();
     let arch_info: &GdbArchInfo = &ctx_info.arch_info;

@@ -1,6 +1,7 @@
 // Copyright (c) 2021, Qualcomm Innovation Center, Inc. All rights reserved.
 //
 // SPDX-License-Identifier: BSD-3-Clause
+//! Process spawning utilities
 use async_io::block_on;
 use futures_lite::io::AsyncWriteExt;
 use smol_timeout::TimeoutExt;
@@ -17,6 +18,7 @@ pub struct ChildResult {
     pub status: ExitStatus,
 }
 
+/// Execute a `command` with `args` and capture the output as a String
 pub fn execute_capture_output<S: AsRef<OsStr>>(command: &str, args: &[S]) -> Result<ChildResult> {
     let output = Command::new(command).args(args).output()?;
 
@@ -27,18 +29,21 @@ pub fn execute_capture_output<S: AsRef<OsStr>>(command: &str, args: &[S]) -> Res
     })
 }
 
+/// Send SIGTERM to a process
 fn kill_gracefully(pid: i32) {
     unsafe {
         libc::kill(pid, libc::SIGTERM);
     }
 }
 
+/// Send SIGKILL to a process
 fn kill_forcefully(pid: i32) {
     unsafe {
         libc::kill(pid, libc::SIGKILL);
     }
 }
 
+/// Mask certainy signals when executing subprocesses
 // SAFETY: simple signal handling
 unsafe fn pre_execute() {
     let mut set: libc::sigset_t = core::mem::MaybeUninit::uninit().assume_init();
@@ -54,6 +59,9 @@ unsafe fn pre_execute() {
     libc::sigprocmask(libc::SIG_BLOCK, &mut set, core::ptr::null_mut());
 }
 
+/// Execute a `command` with `args` while enforcing a timeout of `timeout_ms`, after which the
+/// target process is killed. `input` can be passed if input is to be given to the process via
+/// STDIN
 pub fn execute_capture_output_timeout<S: AsRef<OsStr>>(
     command: &str,
     args: &[S],
