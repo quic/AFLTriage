@@ -61,6 +61,7 @@ extern crate clap;
 extern crate num_cpus;
 
 pub mod afl;
+pub mod environment;
 pub mod debugger;
 pub mod platform;
 pub mod process;
@@ -658,6 +659,7 @@ fn main() {
 fn main_wrapper() -> i32 {
     let args = setup_command_line();
 
+
     println!("AFLTriage v{} by Grant Hernandez\n", VERSION);
     init_logger();
 
@@ -670,8 +672,16 @@ fn main_wrapper() -> i32 {
         signal_hook::flag::register(*sig, Arc::clone(&stop_requested)).unwrap();
     }
 
+    let aenv = match environment::parse_afltriage_env() {
+        Some(e) => e,
+        None => {
+            log::error!("Failed to parse environment variables");
+            return 1;
+        }
+    };
+
     let binary_args: Vec<&str> = args.values_of("command").unwrap().collect();
-    let gdb: GdbTriager = GdbTriager::new("gdb".to_string()); // TODO: AFLTRIAGE_GDB_PATH
+    let gdb: GdbTriager = GdbTriager::new(aenv.gdb_path.to_string());
 
     if !environment_check(&gdb, &binary_args) {
         return 1;
