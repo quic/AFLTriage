@@ -3,9 +3,32 @@
 // SPDX-License-Identifier: BSD-3-Clause
 //! GNU Debugger (GDB) triage functionality
 //!
-//! This relies on the GDBTriage python script (see `res/GDBTriage.py`) to capture and serialize
-//! data from GDB to JSON. No interactive usage with GDB is supported. Note that GDBTriage.py can
-//! be useful independent of AFLTriage.
+//! AFLTriage heavily leans on GDB 7.10 and above to collect crash context. This includes memory,
+//! registers, stack traces, along with symbol and debugging information. GDB acts as an
+//! abstraction layer between AFLTriage and the quirks of individual platforms, architectures, and
+//! executable formats. To effectively extract context from GDB, AFLTriage uses the GDBTriage
+//! python script (see `res/GDBTriage.py`) to cannonicalize and serialize the data into JSON.
+//! Unlike previous triaging tools which just print a bunch of output from GDB and call it a day,
+//! AFLTriage's JSON focus helps it (and its users) avoid fragile string parsing. While GDBTriage
+//! was made for AFLTriage it can be used independently.
+//!
+//! At build time GDBTriage.py is *embedded* into the AFLTriage binary as a resource. This allows
+//! the final AFLTriage binary to be portable between systems without having to worry about using
+//! an installer. At run time, AFLTriage will take this file (which is just a string in the binary)
+//! and write to a temporary file in /tmp. This file path will then be provided to GDB as a script
+//! to load. This script will provide the GDB command `gdbtriage` is executed after running the
+//! target. This script will return a JSON result (AFLTriage refers to this as `rawjson`) with
+//! triage information or an error if, for instance, the target exited without a crash.
+//! This rawjson is parsed and then enriched by AFLTriage into its typical json output format.
+//!
+//! Regarding how GDB is invoked, it is run using the `--batch` mode, meaning that it will spawn,
+//! execute all commands provided to it via command line, and then exit, all in one shot. This
+//! means AFLTriage can get away with just controlling GDB with arguments instead of a more
+//! complicated, interactive focused interface like [GDB/MI (Machine
+//! interface)](https://sourceware.org/gdb/onlinedocs/gdb/GDB_002fMI.html). This is difficult to
+//! achieve as GDB's STDOUT and STDERR outputs are intermingled with debugging output and child
+//! output. AFLTriage uses some tricks to delimit the output appropriately, avoiding the need to
+//! create a dedicated PTY for GDB.
 use serde::{Deserialize, Serialize};
 use std::io::{ErrorKind, Write};
 use std::path::PathBuf;
@@ -498,7 +521,8 @@ impl GdbTriager {
 
             // Make special effort to get target output WITHOUT any GDB logging
             "-iex", "set print inferior-events off",
-            // write the marker to both stdout and stderr as they are not interleaved
+            // Get detailed python errors
+            "-iex", "set python print-stack full",
             // Markers will not print if logging is to /dev/null
             "-ex", MARKER_CHILD_OUTPUT.gdb_start,
             "-ex", "set logging file /dev/null",

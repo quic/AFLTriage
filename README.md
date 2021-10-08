@@ -13,6 +13,7 @@ Some notable features include:
 * Source code and variables will be annotated in reports for context
 
 Currently AFLTriage only supports GDB and has only been tested on Linux C/C++ targets.
+Note that AFLTriage does not classify crashes by potential exploitablity. Accurate exploitability classification is very target and scenario specific and is best left to specialized tools and expert analysts.
 
 ## Usage
 
@@ -111,3 +112,8 @@ ARGS:
             The binary executable and args to execute. Use '@@' as a placeholder for the path to the input file or
             --stdin. Optionally use -- to delimit the start of the command.
 ```
+
+## Related Projects
+* [GDB Exploitable](https://github.com/jfoote/exploitable) - A big inspiration for AFLTriage
+* [Crashwalk](https://github.com/bnagy/crashwalk)
+* afl-collect from [afl-utils](https://github.com/rc0r/afl-utils)
