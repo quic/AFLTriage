@@ -204,6 +204,8 @@ def get_code_context(location, filename):
     if filename == "" or filename in files_with_bad_or_missing_code:
         return None
 
+    filename_norm = filename
+
     if isinstance(location, int):
         lines = gdb.execute("list *0x%x,*0x%x" % (location, location), to_string=True).splitlines()
 
@@ -214,6 +216,7 @@ def get_code_context(location, filename):
 
         if " is in " not in header:
             files_with_bad_or_missing_code[filename] = 1
+            files_with_bad_or_missing_code[filename_norm] = 1
             return None
 
         line = lines[1]
@@ -224,10 +227,20 @@ def get_code_context(location, filename):
         location = location.replace(filename, filename_norm)
         lines = gdb.execute("list %s" % (location), to_string=True).splitlines()
 
+        # Unknown error
         if len(lines) < 1:
             return None
 
-        line = lines[0]
+        # Asking for source info can return MULTIPLE different paths that point to the same place
+        # For example, in rust binaries:
+        #
+        # file: "/absolute/path/src/main.rs", line number: 683, symbol: "???"
+        # 683                 let address = 0x012345usize;
+        # file: "src/main.rs", line number: 683, symbol: "???"
+        # 683                 let address = 0x012345usize;
+        # 
+        # Hence, the last line seems to be more reliable
+        line = lines[-1]
 
     # GDB list can still return lines even though there was an error
     # Filter out common error cases
@@ -236,21 +249,27 @@ def get_code_context(location, filename):
 
     if not match:
         files_with_bad_or_missing_code[filename] = 1
+        files_with_bad_or_missing_code[filename_norm] = 1
         return None
 
     lineno = int(match.group(1))
     code = match.group(2)
 
     if filename:
-        # code not found
-        if ("in %s" % (filename)) in code:
-            files_with_bad_or_missing_code[filename] = 1
-            return None
+        banned_patterns = [
+            # code not found
+            "in %s" % (filename),
+            "in %s" % (filename_norm),
+            # Some errorno print
+            "%s:" % (filename),
+            "%s:" % (filename_norm),
+        ]
 
-        # Some errorno print 
-        if ("%s:" % (filename)) in code:
-            files_with_bad_or_missing_code[filename] = 1
-            return None
+        for bp in banned_patterns:
+            if bp in code:
+                files_with_bad_or_missing_code[filename] = 1
+                files_with_bad_or_missing_code[filename_norm] = 1
+                return None
 
     return lineno, code
 
