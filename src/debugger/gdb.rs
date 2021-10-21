@@ -33,8 +33,10 @@ use serde::{Deserialize, Serialize};
 use std::io::{ErrorKind, Write};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::os::unix::process::ExitStatusExt;
 
 use crate::process::{self, ChildResult};
+use crate::platform::linux::signal_to_string;
 
 #[doc(hidden)]
 /// The built-in GDBTriage python script
@@ -307,22 +309,22 @@ impl GdbTriageError {
         }
     }
 
-    pub fn new_brief(error_kind: GdbTriageErrorKind, error: &str) -> GdbTriageError {
+    pub fn new_brief(error_kind: GdbTriageErrorKind, error: String) -> GdbTriageError {
         GdbTriageError {
             error_kind,
-            error: error.to_string(),
+            error: error,
             details: Vec::new(),
         }
     }
 
-    pub fn new_detailed(
+    pub fn new_detailed<S: AsRef<str>>(
         error_kind: GdbTriageErrorKind,
-        error: &str,
+        error: S,
         details: Vec<String>,
     ) -> GdbTriageError {
         GdbTriageError {
             error_kind,
-            error: error.to_string(),
+            error: error.as_ref().to_string(),
             details,
         }
     }
@@ -540,9 +542,6 @@ impl GdbTriager {
         );
 
         let gdb_cmdline = &[&gdb_args[..], prog_args].concat();
-        let gdb_cmd_fmt = [std::slice::from_ref(&self.gdb_path), gdb_cmdline]
-            .concat()
-            .join(" ");
 
         // Never write to stdin for GDB as it can pass testcases to the target using "run < FILE"
         let output =
@@ -569,8 +568,34 @@ impl GdbTriager {
         let decoded_stderr = &output.stderr;
 
         if show_raw_output {
+            let gdb_cmd_fmt = shlex::join(
+                [std::slice::from_ref(&self.gdb_path), gdb_cmdline]
+                    .concat()
+                    .iter()
+                    .map(|s| &**s)
+                    .collect::<Vec<&str>>()
+            );
             println!("--- RAW GDB BEGIN ---\nPROGRAM CMDLINE: {}\nGDB CMDLINE: {}\nSTDOUT:\n{}\nSTDERR:\n{}\n--- RAW GDB END ---",
                 prog_args[..].join(" "), gdb_cmd_fmt, decoded_stdout, decoded_stderr);
+        }
+
+        if let Some(exit_code) = output.status.code() {
+            if exit_code != 0 {
+                return Err(GdbTriageError::new_brief(
+                    GdbTriageErrorKind::Command,
+                    format!("GDB exited with non-zero code {}", exit_code.to_string())
+                ));
+            }
+        }
+
+        // It's not unheard of for GDB itself to crash or BUG the kernel...
+        if let Some(signal) = output.status.signal() {
+            return Err(GdbTriageError::new_brief(
+                GdbTriageErrorKind::Command,
+                format!("GDB exited via signal {} ({})!",
+                    signal_to_string(signal), signal.to_string()
+                )
+            ));
         }
 
         let child_output_stdout = match MARKER_CHILD_OUTPUT.extract(decoded_stdout) {

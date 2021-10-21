@@ -4,6 +4,7 @@
 use num_enum::TryFromPrimitive;
 use std::convert::TryFrom;
 use strum::IntoStaticStr;
+use signal_hook::consts::signal::*;
 
 // How the Linux kernel assigns SI code namespaces
 //#define SI_FROMUSER(siptr)	((siptr)->si_code <= 0)
@@ -33,6 +34,41 @@ pub fn si_code_to_string(signal: &str, code: i8) -> &'static str {
     }
 
     "SI_UNKNOWN"
+}
+
+pub fn signal_to_string(code: i32) -> &'static str {
+    match code {
+        SIGABRT => stringify!(SIGABRT),
+        SIGALRM => stringify!(SIGALRM),
+        SIGBUS => stringify!(SIGBUS),
+        SIGCHLD => stringify!(SIGCHLD),
+        SIGCONT => stringify!(SIGCONT),
+        SIGFPE => stringify!(SIGFPE),
+        SIGHUP => stringify!(SIGHUP),
+        SIGILL => stringify!(SIGILL),
+        SIGINT => stringify!(SIGINT),
+        SIGIO => stringify!(SIGIO),
+        SIGKILL => stringify!(SIGKILL),
+        SIGPIPE => stringify!(SIGPIPE),
+        SIGPROF => stringify!(SIGPROF),
+        SIGQUIT => stringify!(SIGQUIT),
+        SIGSEGV => stringify!(SIGSEGV),
+        SIGSTOP => stringify!(SIGSTOP),
+        SIGSYS => stringify!(SIGSYS),
+        SIGTERM => stringify!(SIGTERM),
+        SIGTRAP => stringify!(SIGTRAP),
+        SIGTSTP => stringify!(SIGTSTP),
+        SIGTTIN => stringify!(SIGTTIN),
+        SIGTTOU => stringify!(SIGTTOU),
+        SIGURG => stringify!(SIGURG),
+        SIGUSR1 => stringify!(SIGUSR1),
+        SIGUSR2 => stringify!(SIGUSR2),
+        SIGVTALRM => stringify!(SIGVTALRM),
+        SIGWINCH => stringify!(SIGWINCH),
+        SIGXCPU => stringify!(SIGXCPU),
+        SIGXFSZ => stringify!(SIGXFSZ),
+        _ => "UNKNOWN",
+    }
 }
 
 #[allow(non_camel_case_types, clippy::upper_case_acronyms)]
