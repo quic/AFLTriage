@@ -232,6 +232,7 @@ pub struct ReportOptions {
 }
 
 /// Data collected during the profiling of a target to triage crashes against
+#[allow(dead_code)]
 struct ProfileResult {
     process_result: std::io::Result<ChildResult>,
     process_execution_time: Duration,
@@ -475,7 +476,7 @@ struct AflDirInfo {
 /// Collect the paths to crashes found by AFL and read the fuzzer_stats
 fn collect_afl_crashes_from_dir(path: &Path) -> Option<AflDirInfo> {
     let mut testcases = vec![];
-    let path_str = path.to_str().unwrap();
+    let path_str = shlex::quote(path.to_str().unwrap());
 
     match util::list_sorted_files_at(path.join("crashes").as_path()) {
         Ok(tcs) => {
@@ -528,7 +529,8 @@ fn collect_input_testcases(processed_inputs: &mut Vec<UserInputPath>) -> Vec<Tes
     let mut all_testcases = Vec::new();
 
     for input in processed_inputs {
-        let path_str = input.path.to_string_lossy();
+        let path_str = shlex::quote(&input.path.to_string_lossy())
+            .to_string();
 
         match input.ty {
             UserInputPathType::Single => {
@@ -704,7 +706,7 @@ fn main_wrapper() -> i32 {
         }
     }
 
-    log::info!("Image triage cmdline: \"{}\"", binary_args.join(" "));
+    log::info!("Image triage cmdline: {}", util::shell_join(&binary_args));
 
     let output = args.value_of("output").unwrap();
 
@@ -863,13 +865,13 @@ fn main_wrapper() -> i32 {
     }
 
     let write_message: Box<dyn Fn(String, Option<&str>) + Sync> = if display_progress {
-        Box::new(|msg, tc| {
+        Box::new(|msg, _tc| {
             pb.set_message(&msg)
         })
     } else {
         Box::new(|msg, tc| {
             if let Some(tc_name) = tc {
-                log::info!("{}: {}", tc_name, msg)
+                log::info!("{}: {}", shlex::quote(tc_name), msg)
             } else {
                 log::info!("{}", msg)
             }

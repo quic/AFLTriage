@@ -4,7 +4,7 @@
 //! AFL specific handling
 use regex::Regex;
 use std::collections::HashMap;
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{BufRead, BufReader, Error};
 use std::path::Path;
 use std::str::FromStr;

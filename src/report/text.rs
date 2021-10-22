@@ -5,9 +5,8 @@
 use crate::{ReportOptions, ReportEnvelope};
 use crate::debugger::gdb::*;
 use crate::report::enriched::*;
-use crate::util::elide_size;
+use crate::util::{shell_join, elide_size};
 
-use std::cmp;
 use std::collections::HashSet;
 
 enum TextReportSectionEntry {
@@ -28,6 +27,7 @@ impl TextReportSection {
         }
     }
 
+    #[allow(dead_code)]
     fn add(&mut self, entry: TextReportSectionEntry) {
         self.entries.push(entry);
     }
@@ -114,7 +114,7 @@ fn build_text_report(einfo: &EnrichedTriageInfo, envelope: &ReportEnvelope) -> T
 
     header.add_line(format!(
         "Summary: {}\nCommand line: {}\nTestcase: {}\nCrash bucket: {}",
-        einfo.summary, envelope.command_line.join(" "), envelope.testcase, envelope.bucket.strategy_result,
+        einfo.summary, shell_join(&envelope.command_line), shlex::quote(&envelope.testcase), envelope.bucket.strategy_result,
     ));
 
     build_register_info(einfo, &mut register_info);
@@ -165,7 +165,7 @@ fn build_backtrace(einfo: &EnrichedTriageInfo, backtrace: &mut TextReportSection
 
             if let Some(source_ctx) = &fr.source_context {
                 if !source_ctx.is_empty() {
-                    let lines = build_source_context(fr, symbol, source_ctx);
+                    let lines = build_source_context(symbol, source_ctx);
                     ctx.extend(lines);
                 }
             }
@@ -185,7 +185,7 @@ fn build_backtrace(einfo: &EnrichedTriageInfo, backtrace: &mut TextReportSection
     }
 }
 
-fn build_source_context(fr: &EnrichedFrameInfo, symbol: &GdbSymbol, source_ctx: &Vec<EnrichedSourceContext>) -> Vec<String> {
+fn build_source_context(symbol: &GdbSymbol, source_ctx: &Vec<EnrichedSourceContext>) -> Vec<String> {
     /* NNN: <FUNCTION_PROTOTYPE> {
      * |||: <REF 1>
      * |||: <REF 2>
@@ -263,7 +263,7 @@ fn build_source_context(fr: &EnrichedFrameInfo, symbol: &GdbSymbol, source_ctx: 
 }
 
 fn build_target_output(toutput: &EnrichedTargetOutput, opt: &ReportOptions, child_output: &mut TextReportSection) {
-    let mut section_title = |name: &str, output: &str| -> String {
+    let section_title = |name: &str, output: &str| -> String {
         if output.is_empty() {
             format!("Child {} (no output)", name)
         } else if opt.child_output_lines == 0 {
@@ -345,7 +345,7 @@ fn build_instruction_context(einfo: &EnrichedTriageInfo, crash_context: &mut Tex
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     fn load_test(p: &str) -> String {
         std::str::from_utf8(

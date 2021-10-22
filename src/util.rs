@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 //! Utilities
 use regex::Regex;
-use std::io::{self, Error, Read, BufRead};
+use std::io::{self, Read, BufRead};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -103,6 +103,21 @@ pub fn expand_filepath_templates(args: &[&str], value: &str) -> Vec<String> {
     expanded_args
 }
 
+/// The type signature for shlex::join is very restrictive.
+/// Wrap it with a friendlier generic function
+pub fn shell_join<'a, I, S>(args: I) -> String
+where
+    I: IntoIterator<Item = &'a S>,
+    S: AsRef<str> + 'a, {
+
+    shlex::join(
+        args.into_iter()
+        .map(|x| x.as_ref())
+        .collect::<Vec<&str>>()
+    )
+}
+
+#[cfg(test)]
 mod test {
     use super::*;
 

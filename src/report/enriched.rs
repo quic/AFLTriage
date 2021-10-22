@@ -7,7 +7,6 @@
 //! information, faulting frame info, sanitizer reports (if any), and target output.
 //!
 //! This report style can be serizalized to JSON.
-use std::cmp;
 use std::collections::HashSet;
 use std::rc::Rc;
 use super::sanitizer::*;
@@ -193,8 +192,8 @@ pub fn enrich_triage_info(opt: &ReportOptions, triage_result: &GdbTriageResult) 
         None
     };
 
-    let mut summary = "".into();
-    let mut terse_summary = "".into();
+    let summary;
+    let terse_summary;
 
     // Build sanitizer report
     match &faulting_sanitizer_report {
@@ -339,7 +338,7 @@ fn build_instruction_context(arch_info: &GdbArchInfo, regs: &Option<Vec<Rc<GdbRe
     }
 }
 
-fn build_source_context(arch_info: &GdbArchInfo, symbol: &Rc<GdbSymbol>) -> Option<Vec<EnrichedSourceContext>> {
+fn build_source_context(symbol: &Rc<GdbSymbol>) -> Option<Vec<EnrichedSourceContext>> {
     let mut ctx = vec![];
 
     if symbol.callsite.is_none() || symbol.file.is_none() ||
@@ -382,7 +381,7 @@ fn build_frame_info(arch_info: &GdbArchInfo, fr: &GdbFrameInfo) -> EnrichedFrame
     let module = fr.module.to_string();
     let module_address = fr.module_address.to_string();
     let symbol_reduced = fr.symbol.as_ref().map(|s| reduce_debugger_symbol(s));
-    let srcctx = fr.symbol.as_ref().map(|s| build_source_context(arch_info, s)).flatten();
+    let srcctx = fr.symbol.as_ref().map(|s| build_source_context(s)).flatten();
 
     let summary = fr.symbol.as_ref()
         .map(|d| format!("{} in {} ({})", address.f, d.format(), module))
@@ -438,7 +437,7 @@ fn build_stop_info(arch: &GdbArchInfo, stop_info: &GdbStopInfo) -> EnrichedLinux
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use crate::bucket::{CrashBucketInfo, CrashBucketStrategy};
     use crate::{ReportOptions, ReportEnvelope};
     use pretty_assertions::assert_eq;

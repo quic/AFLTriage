@@ -35,7 +35,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::os::unix::process::ExitStatusExt;
 
-use crate::process::{self, ChildResult};
+use crate::util::shell_join;
+use crate::process;
 use crate::platform::linux::signal_to_string;
 
 #[doc(hidden)]
@@ -474,7 +475,7 @@ impl GdbTriager {
         if !output.status.success() || version == None || python_version == None {
             log::error!(
                 "GDB check failure\nARGS:{}\nSTDOUT: {}\nSTDERR: {}",
-                gdb_args.join(" "),
+                shell_join(&gdb_args),
                 decoded_stdout,
                 decoded_stderr
             );
@@ -509,7 +510,12 @@ impl GdbTriager {
 
         let gdb_run_command = match input_file {
             // GDB overwrites args in the format (damn you)
-            Some(file) => format!("run {} < \"{}\"", &prog_args[1..].join(" "), file),
+            // Using this version of run uses the shell to run the command.
+            // Not ideal, but since we don't have a clean TTY for the target, this will have to do
+            Some(file) => format!("run {} < {}",
+                    shell_join(&prog_args[1..]),
+                    shlex::quote(file)
+                ),
             None => String::from("run"),
         };
 
@@ -568,15 +574,12 @@ impl GdbTriager {
         let decoded_stderr = &output.stderr;
 
         if show_raw_output {
-            let gdb_cmd_fmt = shlex::join(
-                [std::slice::from_ref(&self.gdb_path), gdb_cmdline]
+            let gdb_cmd_fmt = shell_join(
+                &[std::slice::from_ref(&self.gdb_path), gdb_cmdline]
                     .concat()
-                    .iter()
-                    .map(|s| &**s)
-                    .collect::<Vec<&str>>()
             );
             println!("--- RAW GDB BEGIN ---\nPROGRAM CMDLINE: {}\nGDB CMDLINE: {}\nSTDOUT:\n{}\nSTDERR:\n{}\n--- RAW GDB END ---",
-                prog_args[..].join(" "), gdb_cmd_fmt, decoded_stdout, decoded_stderr);
+                shell_join(&prog_args[..]), gdb_cmd_fmt, decoded_stdout, decoded_stderr);
         }
 
         if let Some(exit_code) = output.status.code() {
@@ -588,7 +591,7 @@ impl GdbTriager {
             }
         }
 
-        // It's not unheard of for GDB itself to crash or BUG the kernel...
+        // It's not unheard of for GDB itself to crash, OOM, or BUG the kernel...
         if let Some(signal) = output.status.signal() {
             return Err(GdbTriageError::new_brief(
                 GdbTriageErrorKind::Command,
