@@ -1,0 +1,20 @@
+[package]
+name = "afltriage"
+version = "0.1.0"
+authors = ["Grant Hernandez <quic_ghernand@quicinc.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = "2.33.3"
+rayon = "1.5.0"
+lazy_static = "1.4.0"
+indicatif = { version="0.15.0", features=["rayon"] }
+serde = { version="1.0", features=["derive"] }
+shlex = "1"
+serde_json = "1.0"
+regex = "1"
+md5 = "0.7.0"
+libc = "0.2"
+tempfile = "3"
