@@ -117,3 +117,6 @@ ARGS:
 * [GDB Exploitable](https://github.com/jfoote/exploitable) - A big inspiration for AFLTriage
 * [Crashwalk](https://github.com/bnagy/crashwalk)
 * afl-collect from [afl-utils](https://github.com/rc0r/afl-utils)
+
+## License
+AFLTriage is licensed under the BSD 3-clause "New" or "Revised". See [LICENSE](LICENSE) for more details.
