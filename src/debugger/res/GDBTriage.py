@@ -62,6 +62,12 @@ def xlist(s):
 
     return s
 
+def u64(x):
+    if sys.version_info >= (3,):
+        return int(x)
+    else:
+        return long(x)
+
 """
 ######################
 ## Triage functions
@@ -462,7 +468,7 @@ def get_stop_info():
 
     # https://man7.org/linux/man-pages/man2/sigaction.2.html
     if signal_name in ["SIGSEGV", "SIGILL", "SIGBUS", "SIGFPE", "SIGTRAP"]:
-        sinfo["faulting_address"] = int(gdb.parse_and_eval("$_siginfo._sifields._sigfault.si_addr"))
+        sinfo["faulting_address"] = u64(gdb.parse_and_eval("$_siginfo._sifields._sigfault.si_addr")) & u64(0xffffffffffffffff)
 
     return sinfo
 
