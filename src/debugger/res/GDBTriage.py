@@ -351,8 +351,18 @@ def capture_backtrace(primary=True, detailed=False, frame_limit=0):
                 if f_line > 0:
                     sym["function_line"] = f_line
 
-        sym["file"] = xstr(decorator.filename())
+        try:
+            sym["file"] = xstr(decorator.filename())
+        # Workaround known bug https://sourceware.org/bugzilla/show_bug.cgi?id=18984
+        # Should be rare since it only occurs on a call to gdb.solib_name, which is a
+        # fallback path if there isn't a DWARF file entry for this frame's PC. In that
+        # case the file path would equal the module name, meaning it would be discarded
+        # anyways (see below)
+        except OverflowError:
+            sym["file"] = ''
 
+        # If no source file path found, GDB can return just the module name as a fallback
+        # This isn't very helpful for source debugging so discard it
         if sym["file"] == frame_info["module"]:
             sym["file"] = ''
 
